@@ -1,15 +1,46 @@
 "use client";
 import { useParams, useRouter } from "next/navigation";
 import { TechnicalChart } from "@/components/TechnicalChart";
-import { ArrowLeft, BrainCircuit, Zap, Activity, Eye, Share2, Layers, AlertTriangle } from "lucide-react";
+import { ArrowLeft, BrainCircuit, Zap, Activity, Eye, Share2, Layers, AlertTriangle, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button"; // Assuming I check/create this simple button or use primitive
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
+import { useEffect, useState } from "react";
+import { fetchChartData, ChartDataPoint } from "@/lib/api";
+
+const TIMEFRAMES = ['1m', '5m', '15m', '1H', 'D', '1Y', 'ALL'];
 
 export default function TerminalPage() {
     const params = useParams();
     const router = useRouter();
     const ticker = (params.ticker as string).toUpperCase();
+
+    // State
+    const [range, setRange] = useState("1mo"); // Default to 1mo or closest match like 'D'
+    const [activeTf, setActiveTf] = useState("D"); // UI State
+    const [chartData, setChartData] = useState<ChartDataPoint[] | null>(null);
+    const [loading, setLoading] = useState(true);
+
+    // Map UI TF to API Range
+    const handleTimeframeChange = (tf: string) => {
+        setActiveTf(tf);
+        setLoading(true);
+        // Map: 1m -> 1m, 5m -> 5m, 1H -> 1H, etc.
+        // API supports: 1m, 5m, 15m, 1H, D, 1Y, ALL
+        let apiRange = tf;
+        if (tf === '4H') apiRange = '4H'; // If we add 4H later
+        setRange(apiRange);
+    };
+
+    useEffect(() => {
+        const loadData = async () => {
+            // If chartData is null or range changed
+            const data = await fetchChartData(ticker, activeTf);
+            setChartData(data);
+            setLoading(false);
+        };
+        loadData();
+    }, [ticker, activeTf]);
 
     return (
         <div className="min-h-screen bg-[#050505] text-foreground flex flex-col overflow-hidden font-sans selection:bg-primary/30">
@@ -36,7 +67,7 @@ export default function TerminalPage() {
                             <span className="w-2 h-2 rounded-full bg-success animate-pulse" />
                             Market Open
                         </span>
-                        <span>10:42:15 AM</span>
+                        <span>{new Date().toLocaleTimeString()}</span>
                     </div>
                     <button className="flex items-center gap-2 px-3 py-1.5 bg-primary/10 text-primary rounded-md text-sm font-medium hover:bg-primary/20 transition-colors">
                         <Share2 className="w-4 h-4" />
@@ -51,24 +82,38 @@ export default function TerminalPage() {
                 {/* Chart Area (Main) */}
                 <div className="col-span-12 lg:col-span-9 row-span-4 lg:row-span-6 glass rounded-xl border border-white/5 relative overflow-hidden flex flex-col">
                     <div className="absolute top-4 left-4 z-10 flex gap-2">
-                        {/* Timeframe Selectors Mock */}
-                        {['1m', '5m', '15m', '1H', '4H', 'D'].map((tf) => (
-                            <button key={tf} className={cn("px-3 py-1 text-xs font-medium rounded-md glass hover:bg-white/10 transition-colors", tf === '1H' ? "bg-white/10 text-primary" : "text-muted-foreground")}>
+                        {/* Timeframe Selectors */}
+                        {TIMEFRAMES.map((tf) => (
+                            <button
+                                key={tf}
+                                onClick={() => handleTimeframeChange(tf)}
+                                className={cn(
+                                    "px-3 py-1 text-xs font-medium rounded-md glass transition-colors border border-transparent",
+                                    activeTf === tf ? "bg-primary/20 text-primary border-primary/30" : "text-muted-foreground hover:bg-white/10"
+                                )}
+                            >
                                 {tf}
                             </button>
                         ))}
                     </div>
 
-                    {/* Stats overlay on Chart */}
+                    {/* Stats overlay on Chart - Dynamic later? For now Mock is OK or derive from last chartData point */}
                     <div className="absolute top-4 right-4 z-10 flex flex-col items-end pointer-events-none">
-                        <div className="text-3xl font-mono font-bold">₹1,452.30</div>
-                        <div className="text-success text-sm font-mono flex items-center gap-1">
-                            +12.45 (0.86%) <Zap className="w-3 h-3 fill-current" />
+                        <div className="text-3xl font-mono font-bold">
+                            {chartData && chartData.length > 0 ?
+                                (ticker.includes('NVDA') || ticker.includes('AAPL') ? '$' : '₹') + chartData[chartData.length - 1].close.toFixed(2)
+                                : "..."}
                         </div>
                     </div>
 
-                    <div className="flex-1 w-full h-full pt-12 pb-2">
+                    <div className="flex-1 w-full h-full pt-12 pb-2 relative">
+                        {loading && (
+                            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20">
+                                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                            </div>
+                        )}
                         <TechnicalChart
+                            data={chartData || []}
                             colors={{
                                 backgroundColor: "transparent",
                                 textColor: "#64748B",

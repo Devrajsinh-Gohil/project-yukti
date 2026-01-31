@@ -4,6 +4,12 @@ import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { TrendingUp, TrendingDown, Minus, Activity, ArrowRight } from "lucide-react";
 
+export interface SignalDriver {
+    label: string;
+    value: number;
+    sentiment: string;
+}
+
 export interface SignalData {
     id: string;
     ticker: string;
@@ -11,6 +17,8 @@ export interface SignalData {
     price: string;
     action: "BUY" | "SELL" | "NEUTRAL";
     confidence: number;
+    uncertainty: number; // New field from backend
+    drivers?: SignalDriver[]; // New field from backend
     timestamp: string;
     model: string;
 }

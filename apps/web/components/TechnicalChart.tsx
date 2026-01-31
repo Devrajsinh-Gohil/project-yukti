@@ -25,9 +25,19 @@ export function TechnicalChart({ data, volumeData, predictionData, colors, mode 
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
-        const handleResize = () => {
-            chart.applyOptions({ width: chartContainerRef.current!.clientWidth });
-        };
+        if (!chartContainerRef.current) return;
+
+        const resizeObserver = new ResizeObserver((entries) => {
+            for (const entry of entries) {
+                if (entry.contentRect) {
+                    chart.applyOptions({
+                        width: entry.contentRect.width,
+                        height: entry.contentRect.height
+                    });
+                }
+            }
+        });
+        resizeObserver.observe(chartContainerRef.current);
 
         const chart = createChart(chartContainerRef.current, {
             layout: {
@@ -112,10 +122,8 @@ export function TechnicalChart({ data, volumeData, predictionData, colors, mode 
 
         chart.timeScale().fitContent();
 
-        window.addEventListener("resize", handleResize);
-
         return () => {
-            window.removeEventListener("resize", handleResize);
+            resizeObserver.disconnect();
             chart.remove();
         };
     }, [data, volumeData, predictionData, colors]);

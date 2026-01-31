@@ -1,69 +1,39 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MarketSwitch, MarketRegion } from "./MarketSwitch";
 import { SignalCard, SignalData } from "./SignalCard";
 import { useRouter } from "next/navigation";
-
-// Mock Data
-const MOCK_SIGNALS: SignalData[] = [
-    {
-        id: "1",
-        ticker: "RELIANCE",
-        name: "Reliance Industries",
-        price: "₹1,452.30",
-        action: "BUY",
-        confidence: 87,
-        timestamp: "10:45 AM",
-        model: "Mean Reversion v2"
-    },
-    {
-        id: "2",
-        ticker: "TCS",
-        name: "Tata Consultancy Svc",
-        price: "₹3,920.10",
-        action: "NEUTRAL",
-        confidence: 45,
-        timestamp: "10:42 AM",
-        model: "Momentum Alpha"
-    },
-    {
-        id: "3",
-        ticker: "HDFCBANK",
-        name: "HDFC Bank Ltd",
-        price: "₹1,680.50",
-        action: "SELL",
-        confidence: 92,
-        timestamp: "10:30 AM",
-        model: "Volatility Breakout"
-    },
-    {
-        id: "4",
-        ticker: "NVDA",
-        name: "NVIDIA Corp",
-        price: "$890.45",
-        action: "BUY",
-        confidence: 95,
-        timestamp: "Pre-mkt",
-        model: "Trend Follower"
-    }
-];
+import { fetchSignals } from "@/lib/api";
+import { Loader2 } from "lucide-react";
 
 export function Dashboard() {
     const [market, setMarket] = useState<MarketRegion>("IN");
+    const [signals, setSignals] = useState<SignalData[]>([]);
+    const [loading, setLoading] = useState(true);
     const router = useRouter();
+
+    useEffect(() => {
+        const loadSignals = async () => {
+            setLoading(true);
+            const data = await fetchSignals(market);
+            setSignals(data);
+            setLoading(false);
+        };
+        loadSignals();
+    }, [market]);
 
     // Filter signals based on mock logic for now (just showing all or filtered by market if I had that data field)
     // For demo, I'll just show all, maybe filter NVDA for US.
 
-    const filteredSignals = MOCK_SIGNALS.filter(s => {
-        if (market === "IN") return !["NVDA", "AAPL"].includes(s.ticker);
-        if (market === "US") return ["NVDA", "AAPL", "MSFT", "TSLA"].includes(s.ticker);
-        return true;
-    });
+    // The fetchSignals function is now responsible for filtering based on the market.
+    // So, filteredSignals can directly use the signals state.
+    const filteredSignals = signals;
 
     const handleSignalClick = (data: SignalData) => {
-        // Setup minimal robust navigation
+        // Pass data via query params or context in future. 
+        // For now, since Terminal fetches its own or uses static, we just push ticker.
+        // Ideally Terminal should also fetch.
         router.push(`/terminal/${data.ticker}`);
     };
 
@@ -81,22 +51,28 @@ export function Dashboard() {
             </header>
 
             {/* Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {filteredSignals.map((signal) => (
-                    <SignalCard
-                        key={signal.id}
-                        data={signal}
-                        onClick={handleSignalClick}
-                    />
-                ))}
+            {loading ? (
+                <div className="h-64 flex items-center justify-center">
+                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                </div>
+            ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {signals.map((signal) => (
+                        <SignalCard
+                            key={signal.id}
+                            data={signal}
+                            onClick={handleSignalClick}
+                        />
+                    ))}
 
-                {/* Empty State / Skeleton Mock for visual volume */}
-                {filteredSignals.length === 0 && (
-                    <div className="col-span-full h-64 flex items-center justify-center text-muted-foreground glass rounded-xl border-dashed">
-                        No signals found for {market} market.
-                    </div>
-                )}
-            </div>
+                    {/* Empty State */}
+                    {signals.length === 0 && (
+                        <div className="col-span-full h-64 flex items-center justify-center text-muted-foreground glass rounded-xl border-dashed">
+                            No signals found for {market} market. Is the backend running?
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }
