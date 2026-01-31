@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+:root {
+  /* Midnight Blue Background */
+  --background: #0B0E11;
+  --foreground: #F8FAFC; /* Slate 50 */
+  
+  /* Accents */
+  --card: #151A21; /* Slightly lighter than bg */
+  --card-foreground: #F8FAFC;
+  
+  --primary: #D4AF37; /* Gold */
+  --primary-foreground: #0B0E11;
+  
+  --secondary: #8B5CF6; /* Violet */
+  --secondary-foreground: #ffffff;
+  
+  --success: #4ADE80;
+  --danger: #FB7185;
+  
+  --muted: #1E293B;
+  --muted-foreground: #94A3B8;
+
+  --border: #2D3748;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-success: var(--success);
+  --color-danger: var(--danger);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+
+/* Glassmorphism Utilities */
+@utility glass {
+  background: rgba(21, 26, 33, 0.6);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+@utility glass-strong {
+  background: rgba(21, 26, 33, 0.85);
+  backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
