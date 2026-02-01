@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000/api/v1
+    depends_on:
+      - ai-engine
+    networks:
+      - yukti-network
+
+  ai-engine:
+    build:
+      context: ./apps/ai-engine
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      - YFINANCE_CACHE_DIR=/tmp/cache
+    volumes:
+      - ./apps/ai-engine:/app
+    networks:
+      - yukti-network
+
+networks:
+  yukti-network:
+    driver: bridge
