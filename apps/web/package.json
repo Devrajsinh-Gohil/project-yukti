@@ -9,6 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.15",
     "clsx": "^2.1.1",
     "firebase": "^12.8.0",
     "framer-motion": "^12.29.2",
@@ -17,7 +18,8 @@
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
-    "tailwind-merge": "^3.4.0"
+    "tailwind-merge": "^3.4.0",
+    "technicalindicators": "^3.1.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

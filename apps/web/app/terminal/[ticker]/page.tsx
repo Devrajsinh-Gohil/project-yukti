@@ -6,12 +6,14 @@ import { ArrowLeft, BrainCircuit, Zap, Activity, Eye, Share2, Layers, AlertTrian
 import { Button } from "@/components/ui/button"; // Assuming I check/create this simple button or use primitive
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { fetchChartData, ChartDataPoint } from "@/lib/api";
 import { updateHistory, getUserWatchlists, createWatchlist, addToWatchlist, removeFromWatchlist } from "@/lib/db";
+import { calculateIndicators } from "@/lib/indicators";
 import { useAuth } from "@/context/AuthContext";
 import { Heart } from "lucide-react";
 import { UserMenu } from "@/components/UserMenu";
+import { IndicatorMenu } from "@/components/IndicatorMenu";
 
 const TIMEFRAMES = ['1m', '5m', '15m', '1H', 'D', '1Y', 'ALL'];
 
@@ -97,9 +99,30 @@ export default function TerminalPage() {
 
 
 
+    const [showIndicators, setShowIndicators] = useState(false);
+    const [activeIndicators, setActiveIndicators] = useState<string[]>([]);
+
+    const toggleIndicator = (id: string) => {
+        setActiveIndicators(prev =>
+            prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+        );
+    };
+
+    // Calculate Indicators
+    const indicatorsData = useMemo(() => {
+        if (!chartData || activeIndicators.length === 0) return [];
+        return calculateIndicators(chartData, activeIndicators);
+    }, [chartData, activeIndicators]);
+
     return (
         <ProtectedRoute>
             <div className="min-h-screen bg-[#050505] text-foreground flex flex-col overflow-hidden font-sans selection:bg-primary/30">
+                <IndicatorMenu
+                    open={showIndicators}
+                    onOpenChange={setShowIndicators}
+                    onSelectIndicator={toggleIndicator}
+                    activeIndicators={activeIndicators}
+                />
 
                 {/* Navigation Bar */}
                 <header className="h-14 border-b border-white/5 flex items-center justify-between px-4 bg-[#0B0E11]">
@@ -142,7 +165,20 @@ export default function TerminalPage() {
 
                     {/* Chart Area (Main) */}
                     <div className="col-span-12 lg:col-span-9 row-span-4 lg:row-span-6 glass rounded-xl border border-white/5 relative overflow-hidden flex flex-col">
-                        <div className="absolute top-4 left-4 z-10 flex gap-2">
+                        <div className="absolute top-4 left-4 z-10 flex gap-2 items-center">
+                            {/* Indicator Toggle */}
+                            <button
+                                onClick={() => setShowIndicators(true)}
+                                className="flex items-center gap-2 px-3 py-1 bg-white/5 hover:bg-white/10 border border-white/10 rounded-md transition-colors text-xs font-medium text-muted-foreground hover:text-foreground"
+                            >
+                                <Activity className="w-3.5 h-3.5" />
+                                Indicators
+                                {activeIndicators.length > 0 && (
+                                    <span className="bg-primary text-black text-[10px] font-bold px-1 rounded-full">{activeIndicators.length}</span>
+                                )}
+                            </button>
+                            <div className="h-4 w-px bg-white/10 mx-1" />
+
                             {/* Timeframe Selectors */}
                             {TIMEFRAMES.map((tf) => (
                                 <button
@@ -167,6 +203,10 @@ export default function TerminalPage() {
                             </div>
                         </div>
 
+
+
+
+                        {/* Chart Visualization */}
                         <div className="flex-1 w-full h-full pt-12 pb-2 relative">
                             {loading && (
                                 <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20">
@@ -175,6 +215,7 @@ export default function TerminalPage() {
                             )}
                             <TechnicalChart
                                 data={chartData || []}
+                                indicators={indicatorsData}
                                 colors={{
                                     backgroundColor: "transparent",
                                     textColor: "#64748B",
@@ -182,7 +223,6 @@ export default function TerminalPage() {
                             />
                         </div>
                     </div>
-
                     {/* Right Side Column */}
 
                     {/* AI Confidence / Prediction Tile */}

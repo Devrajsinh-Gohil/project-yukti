@@ -1,12 +1,14 @@
 "use client";
 
-import { createChart, ColorType, IChartApi, AreaSeries, CandlestickSeries, HistogramSeries, Time, WhitespaceData } from "lightweight-charts";
+import { createChart, ColorType, IChartApi, AreaSeries, CandlestickSeries, HistogramSeries, LineSeries, Time, WhitespaceData } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
+import { IndicatorData } from "@/lib/indicators";
 
 interface TechnicalChartProps {
     data?: any[]; // Flexible data
     volumeData?: { time: string; value: number; color: string }[];
     predictionData?: { time: string; value: number }[];
+    indicators?: IndicatorData[];
     mode?: "candle" | "area"; // New prop to switch modes
     colors?: {
         backgroundColor?: string;
@@ -19,7 +21,7 @@ interface TechnicalChartProps {
     };
 }
 
-export function TechnicalChart({ data, volumeData, predictionData, colors, mode = "candle" }: TechnicalChartProps) {
+export function TechnicalChart({ data, volumeData, predictionData, indicators, colors, mode = "candle" }: TechnicalChartProps) {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const [tooltipData, setTooltipData] = useState<{
         time: string;
@@ -78,11 +80,13 @@ export function TechnicalChart({ data, volumeData, predictionData, colors, mode 
                 topColor: colors?.areaTopColor || "rgba(212, 175, 55, 0.4)",
                 bottomColor: colors?.areaBottomColor || "rgba(212, 175, 55, 0)",
             });
-            const areaData = data ? data.map(d => ({
+            const areaData = (data && data.length > 0) ? data.map(d => ({
                 time: d.time,
                 value: d.value ?? d.close ?? 0
             })) : [];
-            mainSeries.setData(areaData);
+
+            if (areaData.length > 0) mainSeries.setData(areaData);
+            else mainSeries.setData(generateMockAreaData());
         } else {
             mainSeries = chart.addSeries(CandlestickSeries, {
                 upColor: colors?.upColor || "#4ADE80",
@@ -91,7 +95,7 @@ export function TechnicalChart({ data, volumeData, predictionData, colors, mode 
                 wickUpColor: colors?.upColor || "#4ADE80",
                 wickDownColor: colors?.downColor || "#FB7185",
             });
-            const initialData = data || generateMockCandleData();
+            const initialData = (data && data.length > 0) ? data : generateMockCandleData();
             mainSeries.setData(initialData);
         }
 
@@ -105,6 +109,22 @@ export function TechnicalChart({ data, volumeData, predictionData, colors, mode 
                 scaleMargins: { top: 0.8, bottom: 0 },
             });
             volumeSeries.setData(volumeData);
+        }
+
+        // Indicators (Overlays)
+        if (indicators) {
+            indicators.forEach(ind => {
+                if (ind.type === "overlay") {
+                    const lineSeries = chart.addSeries(LineSeries, {
+                        color: ind.color,
+                        lineWidth: 1,
+                        crosshairMarkerVisible: false,
+                        lastValueVisible: false, // Don't clutter axis
+                        priceLineVisible: false
+                    });
+                    lineSeries.setData(ind.data as any);
+                }
+            });
         }
 
         // Prediction Line
@@ -147,9 +167,20 @@ export function TechnicalChart({ data, volumeData, predictionData, colors, mode 
                     const isUp = changeVal >= 0;
 
                     // Format Time
-                    const dateStr = new Date(Number(param.time) * 1000).toLocaleString('en-US', {
-                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                    });
+                    let dateStr = "";
+                    if (typeof param.time === 'string') {
+                        // "2024-03-15" format
+                        const date = new Date(param.time);
+                        date.setDate(date.getDate() + 1); // Fix timezone offset causing previous day
+                        dateStr = date.toLocaleDateString('en-US', {
+                            month: 'short', day: 'numeric', year: 'numeric'
+                        });
+                    } else {
+                        // Timestamp format
+                        dateStr = new Date(Number(param.time) * 1000).toLocaleString('en-US', {
+                            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                        });
+                    }
 
                     setTooltipData({
                         time: dateStr,

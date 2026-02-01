@@ -5,16 +5,26 @@ import { MarketSwitch, MarketRegion } from "./MarketSwitch";
 import { SignalCard, SignalData } from "./SignalCard";
 import { useRouter } from "next/navigation";
 import { fetchSignals } from "@/lib/api";
-import { Loader2 } from "lucide-react";
+import { Loader2, Activity as LucideActivity } from "lucide-react";
 import { WatchlistWidget } from "./WatchlistWidget";
 import { UserMenu } from "./UserMenu";
 import { SearchBar } from "./SearchBar";
+import { IndicatorMenu } from "./IndicatorMenu";
 
 export function Dashboard() {
     const [market, setMarket] = useState<MarketRegion>("IN");
     const [signals, setSignals] = useState<SignalData[]>([]);
     const [loading, setLoading] = useState(true);
     const router = useRouter();
+
+    const [showIndicators, setShowIndicators] = useState(false);
+    const [activeIndicators, setActiveIndicators] = useState<string[]>([]);
+
+    const toggleIndicator = (id: string) => {
+        setActiveIndicators(prev =>
+            prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]
+        );
+    };
 
     useEffect(() => {
         const loadSignals = async () => {
@@ -41,17 +51,34 @@ export function Dashboard() {
     };
 
     return (
-        <div className="min-h-screen p-6 md:p-10 space-y-10 max-w-7xl mx-auto">
-            {/* Header */}
-            <header className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="min-h-screen bg-[#050505] text-foreground p-6 md:p-10">
+            <IndicatorMenu
+                open={showIndicators}
+                onOpenChange={setShowIndicators}
+                onSelectIndicator={toggleIndicator}
+                activeIndicators={activeIndicators}
+            />
+
+            <header className="flex justify-between items-center mb-8 relative z-10">
                 <div>
-                    <h1 className="text-3xl md:text-4xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60">
-                        Market Pulse
-                    </h1>
-                    <p className="text-muted-foreground mt-1">Real-time AI assisted signals</p>
+                    <h1 className="text-3xl font-bold tracking-tight">Market Terminal</h1>
+                    <p className="text-muted-foreground mt-1">Real-time AI analysis & signals</p>
                 </div>
                 <div className="flex items-center gap-4">
-                    <MarketSwitch currentMarket={market} onChange={setMarket} />
+                    <button
+                        onClick={() => setShowIndicators(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-colors text-sm font-medium"
+                    >
+                        <LucideActivity className="w-4 h-4 text-primary" />
+                        Indicators
+                        {activeIndicators.length > 0 && (
+                            <span className="bg-primary text-black text-[10px] font-bold px-1.5 rounded-full">{activeIndicators.length}</span>
+                        )}
+                    </button>
+                    <MarketSwitch
+                        currentMarket={market}
+                        onChange={setMarket}
+                    />
                     <UserMenu />
                 </div>
             </header>
