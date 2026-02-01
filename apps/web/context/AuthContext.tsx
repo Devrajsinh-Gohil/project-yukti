@@ -27,13 +27,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, async (user) => {
-            if (user) {
-                await syncUserProfile(user);
+            try {
+                if (user) {
+                    await syncUserProfile(user);
+                }
+                setUser(user);
+            } catch (error) {
+                console.error("Auth sync error:", error);
+                // Fallback: still set user if we have one, just DB sync failed
+                if (user) setUser(user);
+            } finally {
+                setLoading(false);
             }
-            setUser(user);
-            setLoading(false);
         });
-
         return () => unsubscribe();
     }, []);
 
@@ -50,7 +56,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const logout = async () => {
         try {
             await signOut(auth);
-            router.push("/login");
+            // ProtectedRoute will handle the redirect when user becomes null
         } catch (error) {
             console.error("Error signing out", error);
         }

@@ -41,3 +41,24 @@ export async function fetchChartData(ticker: string, range: string = "1mo"): Pro
         return [];
     }
 }
+
+
+export interface SearchResult {
+    symbol: string;
+    name: string;
+    exchange: string;
+    type: string;
+}
+
+export async function searchTickers(query: string): Promise<SearchResult[]> {
+    if (!query) return [];
+    try {
+        const response = await fetch(`${API_BASE_URL}/search?q=${encodeURIComponent(query)}`);
+        if (!response.ok) return [];
+        const data = await response.json();
+        return data.results;
+    } catch (error) {
+        console.error("Search failed:", error);
+        return [];
+    }
+}

@@ -7,6 +7,8 @@ import { useRouter } from "next/navigation";
 import { fetchSignals } from "@/lib/api";
 import { Loader2 } from "lucide-react";
 import { WatchlistWidget } from "./WatchlistWidget";
+import { UserMenu } from "./UserMenu";
+import { SearchBar } from "./SearchBar";
 
 export function Dashboard() {
     const [market, setMarket] = useState<MarketRegion>("IN");
@@ -46,10 +48,18 @@ export function Dashboard() {
                     <h1 className="text-3xl md:text-4xl font-bold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white to-white/60">
                         Market Pulse
                     </h1>
-                    <p className="text-muted-foreground mt-1">Real-time AI generated signals</p>
+                    <p className="text-muted-foreground mt-1">Real-time AI assisted signals</p>
                 </div>
-                <MarketSwitch currentMarket={market} onChange={setMarket} />
+                <div className="flex items-center gap-4">
+                    <MarketSwitch currentMarket={market} onChange={setMarket} />
+                    <UserMenu />
+                </div>
             </header>
+
+            {/* Search Section */}
+            <div className="flex justify-center -mt-4 mb-8">
+                <SearchBar />
+            </div>
 
             {/* Main Layout */}
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">

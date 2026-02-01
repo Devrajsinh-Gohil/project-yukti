@@ -21,26 +21,41 @@ export function WatchlistWidget() {
 
     const loadWatchlists = async () => {
         if (!user) return;
-        const lists = await getUserWatchlists(user.uid);
-        setWatchlists(lists);
-        if (lists.length > 0 && !activeListId) {
-            setActiveListId(lists[0].id);
+        try {
+            const lists = await getUserWatchlists(user.uid);
+            setWatchlists(lists);
+            if (lists.length > 0 && !activeListId) {
+                setActiveListId(lists[0].id);
+            }
+        } catch (error) {
+            console.error("Failed to load watchlists:", error);
+            // Fallback to empty
+            setWatchlists([]);
+        } finally {
+            setLoading(false);
         }
-        setLoading(false);
     };
 
     const handleAddTicker = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!user || !activeListId || !newTicker) return;
-        await addToWatchlist(user.uid, activeListId, newTicker.toUpperCase());
-        setNewTicker("");
-        await loadWatchlists(); // Refresh
+        try {
+            await addToWatchlist(user.uid, activeListId, newTicker.toUpperCase());
+            setNewTicker("");
+            await loadWatchlists(); // Refresh
+        } catch (error) {
+            console.error("Failed to add ticker:", error);
+        }
     };
 
     const handleRemoveTicker = async (ticker: string) => {
         if (!user || !activeListId) return;
-        await removeFromWatchlist(user.uid, activeListId, ticker);
-        await loadWatchlists(); // Refresh
+        try {
+            await removeFromWatchlist(user.uid, activeListId, ticker);
+            await loadWatchlists(); // Refresh
+        } catch (error) {
+            console.error("Failed to remove ticker:", error);
+        }
     };
 
     const activeList = watchlists.find(l => l.id === activeListId);

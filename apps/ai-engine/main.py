@@ -52,3 +52,46 @@ async def get_chart(ticker: str, range: str = "1mo"):
     Range options: 1m, 5m, 15m, 1H, D, 1M, 1Y, ALL
     """
     return get_chart_data(ticker, range)
+
+import requests
+from pydantic import BaseModel
+from typing import List
+
+class SearchResultItem(BaseModel):
+    symbol: str
+    name: str
+    exchange: str
+    type: str
+
+class SearchResponse(BaseModel):
+    results: List[SearchResultItem]
+
+@app.get("/api/v1/search", response_model=SearchResponse)
+async def search_ticker(q: str):
+    """
+    Search for tickers using Yahoo Finance Autocomplete.
+    """
+    if not q:
+        return {"results": []}
+    
+    url = f"https://query1.finance.yahoo.com/v1/finance/search?q={q}&quotesCount=10&newsCount=0"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    
+    try:
+        resp = requests.get(url, headers=headers)
+        data = resp.json()
+        
+        items = []
+        if 'quotes' in data:
+            for quote in data['quotes']:
+                # Filter out non-equity if desired, keeping simple for now
+                items.append({
+                    "symbol": quote.get('symbol'),
+                    "name": quote.get('shortname') or quote.get('longname') or quote.get('symbol'),
+                    "exchange": quote.get('exchange', 'Unknown'),
+                    "type": quote.get('quoteType', 'Unknown')
+                })
+        return {"results": items}
+    except Exception as e:
+        print(f"Search API Error: {e}")
+        return {"results": []}

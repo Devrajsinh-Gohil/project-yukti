@@ -57,10 +57,14 @@ export async function getUserWatchlists(userId: string): Promise<Watchlist[]> {
     const listRef = collection(doc(db, "users", userId), "watchlists");
     const q = query(listRef);
     const snapshot = await getDocs(q);
-    return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-    } as Watchlist));
+    return snapshot.docs.map(doc => {
+        const data = doc.data();
+        return {
+            id: doc.id,
+            name: data.name || "Untitled",
+            tickers: Array.isArray(data.tickers) ? data.tickers : []
+        } as Watchlist;
+    });
 }
 
 /**

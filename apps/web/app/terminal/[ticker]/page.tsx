@@ -11,6 +11,7 @@ import { fetchChartData, ChartDataPoint } from "@/lib/api";
 import { updateHistory, getUserWatchlists, createWatchlist, addToWatchlist, removeFromWatchlist } from "@/lib/db";
 import { useAuth } from "@/context/AuthContext";
 import { Heart } from "lucide-react";
+import { UserMenu } from "@/components/UserMenu";
 
 const TIMEFRAMES = ['1m', '5m', '15m', '1H', 'D', '1Y', 'ALL'];
 
@@ -60,28 +61,37 @@ export default function TerminalPage() {
 
         // 2. Check if in Favorites
         const checkFavorite = async () => {
-            const lists = await getUserWatchlists(user.uid);
-            const favList = lists.find(l => l.name === "Favorites") || lists[0];
-            if (favList) {
-                setFavListId(favList.id);
-                setIsFavorite(favList.tickers.includes(ticker));
-            } else {
-                // Should have been created on signup, but fallback
-                await createWatchlist(user.uid, "Favorites");
-                // Retry? Simplification: Just leave as false
+            try {
+                const lists = await getUserWatchlists(user.uid);
+                const favList = lists.find(l => l.name === "Favorites") || lists[0];
+                if (favList) {
+                    setFavListId(favList.id);
+                    setIsFavorite(favList.tickers.includes(ticker));
+                } else {
+                    // Try to create, but catch errors
+                    try {
+                        await createWatchlist(user.uid, "Favorites");
+                    } catch (e) { console.warn("Failed to create default watchlist", e) }
+                }
+            } catch (error) {
+                console.error("Failed to sync favorites:", error);
             }
         };
         checkFavorite();
-    }, [user, ticker, loading]); // Added loading/ticker dependency
+    }, [user, ticker, loading]);
 
     const toggleFavorite = async () => {
         if (!user || !favListId) return;
-        if (isFavorite) {
-            await removeFromWatchlist(user.uid, favListId, ticker);
-            setIsFavorite(false);
-        } else {
-            await addToWatchlist(user.uid, favListId, ticker);
-            setIsFavorite(true);
+        try {
+            if (isFavorite) {
+                await removeFromWatchlist(user.uid, favListId, ticker);
+                setIsFavorite(false);
+            } else {
+                await addToWatchlist(user.uid, favListId, ticker);
+                setIsFavorite(true);
+            }
+        } catch (error) {
+            console.error("Failed to toggle favorite:", error);
         }
     };
 
@@ -123,6 +133,7 @@ export default function TerminalPage() {
                             <Share2 className="w-4 h-4" />
                             Share
                         </button>
+                        <UserMenu />
                     </div>
                 </header>
 

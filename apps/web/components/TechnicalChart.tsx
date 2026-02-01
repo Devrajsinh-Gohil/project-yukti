@@ -1,7 +1,7 @@
 "use client";
 
 import { createChart, ColorType, IChartApi, AreaSeries, CandlestickSeries, HistogramSeries, Time, WhitespaceData } from "lightweight-charts";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 interface TechnicalChartProps {
     data?: any[]; // Flexible data
@@ -21,11 +21,148 @@ interface TechnicalChartProps {
 
 export function TechnicalChart({ data, volumeData, predictionData, colors, mode = "candle" }: TechnicalChartProps) {
     const chartContainerRef = useRef<HTMLDivElement>(null);
+    const [tooltipData, setTooltipData] = useState<{
+        time: string;
+        open: string;
+        high: string;
+        low: string;
+        close: string;
+        change: string;
+        changeColor: string;
+    } | null>(null);
 
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
-        if (!chartContainerRef.current) return;
+        const chart = createChart(chartContainerRef.current, {
+            layout: {
+                background: { type: ColorType.Solid, color: colors?.backgroundColor || "transparent" },
+                textColor: colors?.textColor || "#94A3B8",
+                attributionLogo: false,
+            },
+            width: chartContainerRef.current.clientWidth,
+            height: chartContainerRef.current.clientHeight,
+            grid: {
+                vertLines: { color: "rgba(255, 255, 255, 0.05)" },
+                horzLines: { color: "rgba(255, 255, 255, 0.05)" },
+            },
+            timeScale: {
+                borderColor: "rgba(255, 255, 255, 0.1)",
+                timeVisible: true,
+                secondsVisible: false,
+            },
+            rightPriceScale: {
+                borderColor: "rgba(255, 255, 255, 0.1)",
+            },
+            crosshair: {
+                vertLine: {
+                    labelVisible: true,
+                    style: 0, // Solid
+                    width: 1,
+                    color: "rgba(255, 255, 255, 0.2)",
+                },
+                horzLine: {
+                    labelVisible: true,
+                    style: 0, // Solid
+                    width: 1,
+                    color: "rgba(255, 255, 255, 0.2)",
+                },
+            },
+        });
+
+        let mainSeries: any;
+
+        if (mode === "area") {
+            mainSeries = chart.addSeries(AreaSeries, {
+                lineColor: colors?.lineColor || "#D4AF37",
+                topColor: colors?.areaTopColor || "rgba(212, 175, 55, 0.4)",
+                bottomColor: colors?.areaBottomColor || "rgba(212, 175, 55, 0)",
+            });
+            const areaData = data ? data.map(d => ({
+                time: d.time,
+                value: d.value ?? d.close ?? 0
+            })) : [];
+            mainSeries.setData(areaData);
+        } else {
+            mainSeries = chart.addSeries(CandlestickSeries, {
+                upColor: colors?.upColor || "#4ADE80",
+                downColor: colors?.downColor || "#FB7185",
+                borderVisible: false,
+                wickUpColor: colors?.upColor || "#4ADE80",
+                wickDownColor: colors?.downColor || "#FB7185",
+            });
+            const initialData = data || generateMockCandleData();
+            mainSeries.setData(initialData);
+        }
+
+        // Volume Series (Overlay)
+        if (volumeData) {
+            const volumeSeries = chart.addSeries(HistogramSeries, {
+                priceFormat: { type: 'volume' },
+                priceScaleId: '',
+            });
+            volumeSeries.priceScale().applyOptions({
+                scaleMargins: { top: 0.8, bottom: 0 },
+            });
+            volumeSeries.setData(volumeData);
+        }
+
+        // Prediction Line
+        if (predictionData) {
+            const predSeries = chart.addSeries(AreaSeries, {
+                lineColor: "#D4AF37",
+                topColor: "rgba(212, 175, 55, 0.2)",
+                bottomColor: "rgba(212, 175, 55, 0)",
+                lineStyle: 2,
+                lineWidth: 2
+            });
+            predSeries.setData(predictionData);
+        }
+
+        chart.timeScale().fitContent();
+
+        // Crosshair Handler
+        chart.subscribeCrosshairMove((param) => {
+            if (
+                param.point === undefined ||
+                !param.time ||
+                param.point.x < 0 ||
+                param.point.x > chartContainerRef.current!.clientWidth ||
+                param.point.y < 0 ||
+                param.point.y > chartContainerRef.current!.clientHeight
+            ) {
+                setTooltipData(null);
+            } else {
+                // Get data from the main series
+                const dataPoint = param.seriesData.get(mainSeries) as any;
+                if (dataPoint) {
+                    const open = dataPoint.open !== undefined ? dataPoint.open : dataPoint.value;
+                    const close = dataPoint.close !== undefined ? dataPoint.close : dataPoint.value;
+                    const high = dataPoint.high !== undefined ? dataPoint.high : open;
+                    const low = dataPoint.low !== undefined ? dataPoint.low : open;
+
+                    // Calculate Change
+                    const changeVal = close - open;
+                    const changePercent = ((changeVal / open) * 100).toFixed(2);
+                    const isUp = changeVal >= 0;
+
+                    // Format Time
+                    const dateStr = new Date(Number(param.time) * 1000).toLocaleString('en-US', {
+                        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+                    });
+
+                    setTooltipData({
+                        time: dateStr,
+                        open: open.toFixed(2),
+                        high: high.toFixed(2),
+                        low: low.toFixed(2),
+                        close: close.toFixed(2),
+                        change: `${isUp ? '+' : ''}${changePercent}%`,
+                        changeColor: isUp ? "text-green-400" : "text-red-400"
+                    });
+                }
+            }
+        });
 
         const resizeObserver = new ResizeObserver((entries) => {
             for (const entry of entries) {
@@ -39,96 +176,52 @@ export function TechnicalChart({ data, volumeData, predictionData, colors, mode 
         });
         resizeObserver.observe(chartContainerRef.current);
 
-        const chart = createChart(chartContainerRef.current, {
-            layout: {
-                background: { type: ColorType.Solid, color: colors?.backgroundColor || "transparent" },
-                textColor: colors?.textColor || "#94A3B8",
-                attributionLogo: false, // Attempt to disable if present in this version
-            },
-            width: chartContainerRef.current.clientWidth,
-            height: chartContainerRef.current.clientHeight, // Fill container
-            grid: {
-                vertLines: { color: "rgba(255, 255, 255, 0.05)" },
-                horzLines: { color: "rgba(255, 255, 255, 0.05)" },
-            },
-            timeScale: {
-                borderColor: "rgba(255, 255, 255, 0.1)",
-                timeVisible: true,
-            },
-            rightPriceScale: {
-                borderColor: "rgba(255, 255, 255, 0.1)",
-            },
-        });
-
-        if (mode === "area") {
-            const areaSeries = chart.addSeries(AreaSeries, {
-                lineColor: colors?.lineColor || "#D4AF37",
-                topColor: colors?.areaTopColor || "rgba(212, 175, 55, 0.4)",
-                bottomColor: colors?.areaBottomColor || "rgba(212, 175, 55, 0)",
-            });
-            // Adapt data for area if needed, assuming data has 'value' if area mode
-            // If data is candle data (open/close), use close for value?
-            // Let's assume caller provides correct data shape or we map it.
-            const areaData = data ? data.map(d => ({
-                time: d.time,
-                value: d.value ?? d.close ?? 0
-            })) : [];
-
-            if (data) areaSeries.setData(areaData);
-            else areaSeries.setData(generateMockAreaData());
-
-        } else {
-            // Candlestick Series
-            const candleSeries = chart.addSeries(CandlestickSeries, {
-                upColor: colors?.upColor || "#4ADE80",
-                downColor: colors?.downColor || "#FB7185",
-                borderVisible: false,
-                wickUpColor: colors?.upColor || "#4ADE80",
-                wickDownColor: colors?.downColor || "#FB7185",
-            });
-
-            const initialData = data || generateMockCandleData();
-            candleSeries.setData(initialData);
-        }
-
-        // Volume Series (Overlay)
-        if (volumeData) {
-            const volumeSeries = chart.addSeries(HistogramSeries, {
-                priceFormat: {
-                    type: 'volume',
-                },
-                priceScaleId: '', // Overlay on same scale but at bottom
-            });
-            volumeSeries.priceScale().applyOptions({
-                scaleMargins: {
-                    top: 0.8, // Highest volume bar takes up bottom 20%
-                    bottom: 0,
-                },
-            });
-            volumeSeries.setData(volumeData);
-        }
-
-        // Prediction Line (Area for confidence or Line for path)
-        if (predictionData) {
-            const predSeries = chart.addSeries(AreaSeries, {
-                lineColor: "#D4AF37",
-                topColor: "rgba(212, 175, 55, 0.2)",
-                bottomColor: "rgba(212, 175, 55, 0)",
-                lineStyle: 2, // Dashed
-                lineWidth: 2
-            });
-            predSeries.setData(predictionData);
-        }
-
-        chart.timeScale().fitContent();
-
         return () => {
             resizeObserver.disconnect();
             chart.remove();
         };
-    }, [data, volumeData, predictionData, colors]);
+    }, [data, volumeData, predictionData, colors, mode]);
 
-    return <div ref={chartContainerRef} className="w-full h-full" />;
+    return (
+        <div className="relative w-full h-full group">
+            <div ref={chartContainerRef} className="w-full h-full" />
+
+            {/* Legend / Tooltip Overlay */}
+            <div className="absolute top-4 left-4 z-20 pointer-events-none transition-opacity duration-200">
+                {tooltipData ? (
+                    <div className="glass-strong rounded-lg p-3 border border-white/10 shadow-xl bg-[#0B0E11]/80 backdrop-blur-md">
+                        <div className="flex items-center gap-3 text-xs font-mono mb-2 text-muted-foreground border-b border-white/5 pb-1">
+                            <span>{tooltipData.time}</span>
+                            <span className={tooltipData.changeColor}>{tooltipData.change}</span>
+                        </div>
+                        <div className="grid grid-cols-4 gap-4 text-xs">
+                            <div>
+                                <div className="text-muted-foreground scale-[0.8] origin-left uppercase">Open</div>
+                                <div className="font-semibold text-white">{tooltipData.open}</div>
+                            </div>
+                            <div>
+                                <div className="text-muted-foreground scale-[0.8] origin-left uppercase">High</div>
+                                <div className="font-semibold text-white">{tooltipData.high}</div>
+                            </div>
+                            <div>
+                                <div className="text-muted-foreground scale-[0.8] origin-left uppercase">Low</div>
+                                <div className="font-semibold text-white">{tooltipData.low}</div>
+                            </div>
+                            <div>
+                                <div className="text-muted-foreground scale-[0.8] origin-left uppercase">Close</div>
+                                <div className="font-semibold text-white">{tooltipData.close}</div>
+                            </div>
+                        </div>
+                    </div>
+                ) : (
+                    // Default View: Show last available data point or Title
+                    <div className="glass-strong rounded-lg p-2 border border-white/5 bg-[#0B0E11]/50 backdrop-blur-sm opacity-50">
+                        <span className="text-xs text-muted-foreground">Hover for details</span>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
 }
 
 function generateMockCandleData() {

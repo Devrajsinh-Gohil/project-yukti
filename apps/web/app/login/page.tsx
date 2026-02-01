@@ -1,13 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { ArrowRight, Loader2, PlayCircle } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export default function LoginPage() {
-    const { signInWithGoogle } = useAuth();
+    const { signInWithGoogle, user, loading } = useAuth();
     const [isLoading, setIsLoading] = useState(false);
+    const router = useRouter();
+
+    useEffect(() => {
+        if (!loading && user) {
+            router.push("/");
+        }
+    }, [user, loading, router]);
 
     const handleGoogleLogin = async () => {
         setIsLoading(true);
