@@ -8,6 +8,9 @@ import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { useEffect, useState } from "react";
 import { fetchChartData, ChartDataPoint } from "@/lib/api";
+import { updateHistory, getUserWatchlists, createWatchlist, addToWatchlist, removeFromWatchlist } from "@/lib/db";
+import { useAuth } from "@/context/AuthContext";
+import { Heart } from "lucide-react";
 
 const TIMEFRAMES = ['1m', '5m', '15m', '1H', 'D', '1Y', 'ALL'];
 
@@ -41,7 +44,46 @@ export default function TerminalPage() {
             setLoading(false);
         };
         loadData();
+        // ... existing loadData useEffect ...
     }, [ticker, activeTf]);
+
+    // History & Favorites
+    const { user } = useAuth(); // Need user from context
+    const [isFavorite, setIsFavorite] = useState(false);
+    const [favListId, setFavListId] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (!user || loading) return;
+
+        // 1. Update History
+        updateHistory(user.uid, ticker).catch(console.error);
+
+        // 2. Check if in Favorites
+        const checkFavorite = async () => {
+            const lists = await getUserWatchlists(user.uid);
+            const favList = lists.find(l => l.name === "Favorites") || lists[0];
+            if (favList) {
+                setFavListId(favList.id);
+                setIsFavorite(favList.tickers.includes(ticker));
+            } else {
+                // Should have been created on signup, but fallback
+                await createWatchlist(user.uid, "Favorites");
+                // Retry? Simplification: Just leave as false
+            }
+        };
+        checkFavorite();
+    }, [user, ticker, loading]); // Added loading/ticker dependency
+
+    const toggleFavorite = async () => {
+        if (!user || !favListId) return;
+        if (isFavorite) {
+            await removeFromWatchlist(user.uid, favListId, ticker);
+            setIsFavorite(false);
+        } else {
+            await addToWatchlist(user.uid, favListId, ticker);
+            setIsFavorite(true);
+        }
+    };
 
 
 
@@ -61,6 +103,9 @@ export default function TerminalPage() {
                         <div className="flex flex-col">
                             <div className="flex items-center gap-2">
                                 <h1 className="font-bold text-lg tracking-tight">{ticker}</h1>
+                                <button onClick={toggleFavorite} className="hover:scale-110 transition-transform">
+                                    <Heart className={cn("w-5 h-5 transition-colors", isFavorite ? "fill-red-500 text-red-500" : "text-muted-foreground")} />
+                                </button>
                                 <span className="text-xs bg-primary/20 text-primary px-1.5 py-0.5 rounded text-[10px] font-mono">AI-DRIVEN</span>
                             </div>
                         </div>

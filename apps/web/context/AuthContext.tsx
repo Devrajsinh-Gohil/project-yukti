@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, ReactNode } from "react
 import { User, onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { useRouter } from "next/navigation";
+import { syncUserProfile } from "@/lib/db";
 
 interface AuthContextType {
     user: User | null;
@@ -25,7 +26,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const router = useRouter();
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, (user) => {
+        const unsubscribe = onAuthStateChanged(auth, async (user) => {
+            if (user) {
+                await syncUserProfile(user);
+            }
             setUser(user);
             setLoading(false);
         });

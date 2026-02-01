@@ -6,6 +6,7 @@ import { SignalCard, SignalData } from "./SignalCard";
 import { useRouter } from "next/navigation";
 import { fetchSignals } from "@/lib/api";
 import { Loader2 } from "lucide-react";
+import { WatchlistWidget } from "./WatchlistWidget";
 
 export function Dashboard() {
     const [market, setMarket] = useState<MarketRegion>("IN");
@@ -50,29 +51,42 @@ export function Dashboard() {
                 <MarketSwitch currentMarket={market} onChange={setMarket} />
             </header>
 
-            {/* Grid */}
-            {loading ? (
-                <div className="h-64 flex items-center justify-center">
-                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {signals.map((signal) => (
-                        <SignalCard
-                            key={signal.id}
-                            data={signal}
-                            onClick={handleSignalClick}
-                        />
-                    ))}
+            {/* Main Layout */}
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
 
-                    {/* Empty State */}
-                    {signals.length === 0 && (
-                        <div className="col-span-full h-64 flex items-center justify-center text-muted-foreground glass rounded-xl border-dashed">
-                            No signals found for {market} market. Is the backend running?
+                {/* Left: Signals */}
+                <div className="lg:col-span-3">
+                    {loading ? (
+                        <div className="h-64 flex items-center justify-center">
+                            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            {signals.map((signal) => (
+                                <SignalCard
+                                    key={signal.id}
+                                    data={signal}
+                                    onClick={handleSignalClick}
+                                />
+                            ))}
+
+                            {/* Empty State */}
+                            {signals.length === 0 && (
+                                <div className="col-span-full h-64 flex items-center justify-center text-muted-foreground glass rounded-xl border-dashed">
+                                    No signals found for {market} market. Is the backend running?
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
-            )}
+
+                {/* Right: Watchlist (Sticky) */}
+                <div className="lg:col-span-1">
+                    <div className="lg:sticky lg:top-6 h-[calc(100vh-10rem)]">
+                        <WatchlistWidget />
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }
