@@ -1,10 +1,24 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from contextlib import asynccontextmanager
+import asyncio
+from services.mq_listener import listen_to_market_data
+from routes import stream
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Start Redis Listener
+    task = asyncio.create_task(listen_to_market_data())
+    yield
+    # Shutdown logic (if any)
+    # task.cancel()
+
 app = FastAPI(
     title="Project Yukti AI Engine",
     description="Financial Signal Generation & Analysis API",
-    version="0.1.0"
+    version="0.1.0",
+    lifespan=lifespan
 )
 
 # Configure CORS (Allow Frontend)
@@ -20,6 +34,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(stream.router, prefix="/api/v1")
 
 @app.get("/")
 async def health_check():

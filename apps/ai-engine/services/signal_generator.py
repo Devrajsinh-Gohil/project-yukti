@@ -11,6 +11,7 @@ from models import Signal, SignalAction, SignalDriver, MarketRegion, SignalRespo
 # Tickers
 TICKERS_IN = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "INFY.NS", "ICICIBANK.NS", "SBIN.NS", "BHARTIARTL.NS", "ITC.NS"]
 TICKERS_US = ["NVDA", "AAPL", "MSFT", "TSLA", "AMZN", "GOOGL", "META", "AMD"]
+TICKERS_CRYPTO = ["BTC-USD", "ETH-USD", "SOL-USD", "DOGE-USD", "XRP-USD", "BNB-USD", "ADA-USD", "AVAX-USD"]
 
 DRIVERS = [
     "RSI Divergence", "Volume Breakout", "MACD Crossover", "Bollinger Band Squeeze",
@@ -188,7 +189,13 @@ def generate_mock_signal_fallback(ticker: str) -> Signal:
     )
 
 def get_market_signals(market: MarketRegion) -> SignalResponse:
-    tickers = TICKERS_IN if market == MarketRegion.IN else TICKERS_US
+    tickers = []
+    if market == MarketRegion.IN:
+        tickers = TICKERS_IN
+    elif market == MarketRegion.US:
+        tickers = TICKERS_US
+    elif market == MarketRegion.CRYPTO:
+        tickers = TICKERS_CRYPTO
     signals = []
     
     # Analyze all tickers

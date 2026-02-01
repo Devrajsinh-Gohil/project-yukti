@@ -18,8 +18,11 @@ import { ChartLegend } from "@/components/ChartLegend";
 import { WatchlistPanel } from "@/components/WatchlistPanel";
 import { NewsPanel } from "@/components/NewsPanel";
 import { IndicatorSettingsDialog } from "@/components/IndicatorSettingsDialog";
+import { useMarketStream } from "@/hooks/useMarketStream";
 
 const TIMEFRAMES = ['1m', '5m', '15m', '1H', 'D', '1Y', 'ALL'];
+
+const CHART_COLORS = { backgroundColor: "#050505", textColor: "#64748B" };
 
 const DEFAULT_INDICATOR_PARAMS: Record<string, any> = {
     SMA: { period: 20 },
@@ -30,6 +33,8 @@ const DEFAULT_INDICATOR_PARAMS: Record<string, any> = {
     Stochastic: { period: 14, signal: 3 },
     CCI: { period: 20 },
     ATR: { period: 14 },
+
+
     ParabolicSAR: { step: 0.02, max: 0.2 },
     SuperTrend: { period: 10, multiplier: 3 }
 };
@@ -46,6 +51,41 @@ export default function TerminalPage() {
     const [loading, setLoading] = useState(true);
     const [chartMode, setChartMode] = useState<"candle" | "area" | "line" | "heikin">("candle");
 
+    // Live Data State
+    const { lastTrade } = useMarketStream(true); // Always listen, filter locally
+    const [liveCandle, setLiveCandle] = useState<ChartDataPoint | undefined>(undefined);
+
+    // Filter and Process Stream
+    useEffect(() => {
+        if (!lastTrade || !chartData || chartData.length === 0) return;
+
+        // Normalization: BTC-USD (Page) vs BTCUSDT (Stream)
+        const pageSymbol = ticker.replace("-", "").replace("USD", "").toUpperCase();
+        const streamSymbol = lastTrade.symbol.toUpperCase();
+
+        if (streamSymbol.startsWith(pageSymbol)) {
+            // Get last candle
+            const lastCandle = chartData[chartData.length - 1];
+
+            // Check if last candle is "today" or relevant interval. 
+            // For simplicity in this demo, we update the last candle in place.
+            // In a real app, we'd check timestamps to see if we need a NEW candle.
+
+            const newPrice = lastTrade.price;
+
+            // Create updated candle
+            const updated: ChartDataPoint = {
+                ...lastCandle,
+                close: newPrice,
+                high: Math.max(lastCandle.high, newPrice),
+                low: Math.min(lastCandle.low, newPrice),
+                // volume: lastCandle.volume + lastTrade.size // Optional accumulation
+            };
+
+            setLiveCandle(updated);
+        }
+    }, [lastTrade, chartData, ticker]);
+
     // Map UI TF to API Range
     const handleTimeframeChange = (tf: string) => {
         setActiveTf(tf);
@@ -53,6 +93,8 @@ export default function TerminalPage() {
         let apiRange = tf;
         if (tf === '4H') apiRange = '4H';
         setRange(apiRange);
+        // Reset live candle on TF change until new data loads
+        setLiveCandle(undefined);
     };
 
     useEffect(() => {
@@ -60,6 +102,7 @@ export default function TerminalPage() {
             const data = await fetchChartData(ticker, activeTf);
             setChartData(data);
             setLoading(false);
+            setLiveCandle(undefined);
         };
         loadData();
     }, [ticker, activeTf]);
@@ -336,21 +379,17 @@ export default function TerminalPage() {
                             )}
 
                             {/* Legend Overlay */}
-                            <ChartLegend
-                                ticker={ticker}
-                                indicators={activeIndicators}
-                                onRemoveIndicator={handleRemoveIndicator}
-                                onEditIndicator={handleEditIndicator}
-                            />
-
                             <TechnicalChart
                                 data={chartDataToRender}
                                 indicators={indicatorsData}
                                 activeTool={activeTool}
                                 mode={chartMode}
                                 onDrawingComplete={() => setActiveTool("cursor")}
-                                colors={{ backgroundColor: "#050505", textColor: "#64748B" }}
+                                colors={CHART_COLORS}
+                                liveDataPoint={liveCandle}
                             />
+
+
                         </div>
                     </div>
 

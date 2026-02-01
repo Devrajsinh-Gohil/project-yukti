@@ -34,6 +34,7 @@ interface TechnicalChartProps {
     };
     activeTool?: string;
     onDrawingComplete?: () => void;
+    liveDataPoint?: { time: string | number; open?: number; high?: number; low?: number; close?: number; value?: number };
 }
 
 export function TechnicalChart({
@@ -44,7 +45,8 @@ export function TechnicalChart({
     colors,
     mode = "candle",
     activeTool = "cursor",
-    onDrawingComplete
+    onDrawingComplete,
+    liveDataPoint
 }: TechnicalChartProps) {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRefs = useRef<IChartApi[]>([]);
@@ -219,12 +221,39 @@ export function TechnicalChart({
 
         setIsChartReady(true);
 
-        return () => {
-            resizeObserver.disconnect();
-            chartRefs.current.forEach(c => c.remove());
-        };
+    }, [data, indicators, mode, colors]); // Main rebuild effect
 
-    }, [data, indicators, mode, colors]);
+    // --- Real-time Updates ---
+    // --- Real-time Updates ---
+    useEffect(() => {
+        if (!mainSeriesRef.current || !liveDataPoint) return;
+
+        // Validation: Ensure valid data for the chart type
+        // Line/Area needs 'value', Candle needs 'open', 'high', 'low', 'close'
+        // Lightweight Charts requires 'time'
+        if (!liveDataPoint.time) return;
+
+        try {
+            // Check for valid numbers based on mode
+            if (mode === 'line' || mode === 'area') {
+                if (typeof liveDataPoint.value !== 'number') return;
+            } else {
+                // Candle
+                if (
+                    typeof liveDataPoint.open !== 'number' ||
+                    typeof liveDataPoint.high !== 'number' ||
+                    typeof liveDataPoint.low !== 'number' ||
+                    typeof liveDataPoint.close !== 'number'
+                ) {
+                    return;
+                }
+            }
+
+            mainSeriesRef.current.update(liveDataPoint);
+        } catch (err) {
+            console.error("Chart Update Failed", err, liveDataPoint);
+        }
+    }, [liveDataPoint, mode]);
 
 
     // --- Drawing Renderers ---
@@ -484,7 +513,9 @@ export function TechnicalChart({
                     onMouseMove={handleMouseMove}
                 >
                     <svg className="w-full h-full overflow-visible">
+                        {/* eslint-disable-next-line react-hooks/refs */}
                         {drawings.map(d => renderDrawing(d))}
+                        {/* eslint-disable-next-line react-hooks/refs */}
                         {currentDrawing && renderDrawing(currentDrawing)}
                     </svg>
                 </div>

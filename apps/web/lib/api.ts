@@ -2,7 +2,7 @@ import { SignalData } from "@/components/SignalCard";
 
 const API_BASE_URL = "http://localhost:8000/api/v1";
 
-export async function fetchSignals(market: "IN" | "US" = "IN"): Promise<SignalData[]> {
+export async function fetchSignals(market: "IN" | "US" | "CRYPTO" = "IN"): Promise<SignalData[]> {
     try {
         const response = await fetch(`${API_BASE_URL}/signals?market=${market}`);
         if (!response.ok) {

@@ -11,6 +11,7 @@ class SignalAction(str, Enum):
 class MarketRegion(str, Enum):
     US = "US"
     IN = "IN"
+    CRYPTO = "CRYPTO"
 
 class SignalDriver(BaseModel):
     label: str = Field(..., description="Name of the factor (e.g. RSI, Volume)")

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { cn } from "@/lib/utils";
 import { MarketSwitch, MarketRegion } from "./MarketSwitch";
+import { useMarketStream } from "@/hooks/useMarketStream";
 import { SignalCard, SignalData } from "./SignalCard";
 import { useRouter } from "next/navigation";
 import { fetchSignals } from "@/lib/api";
@@ -39,6 +41,28 @@ export function Dashboard() {
     // Filter signals based on mock logic for now (just showing all or filtered by market if I had that data field)
     // For demo, I'll just show all, maybe filter NVDA for US.
 
+    // Stream Integration
+    const { lastTrade, status } = useMarketStream(market === "CRYPTO");
+
+    useEffect(() => {
+        if (!lastTrade) return;
+
+        setSignals(prev => prev.map(sig => {
+            // Normalize: API matches yfinance (BTC-USD), Stream matches Binance (BTCUSDT)
+            const baseTicker = sig.ticker.replace("-", "").replace("USD", "").toUpperCase();
+            const streamSymbol = lastTrade.symbol.toUpperCase();
+
+            // Match if stream symbol starts with base ticker (e.g. BTCUSDT starts with BTC)
+            if (streamSymbol.startsWith(baseTicker)) {
+                return {
+                    ...sig,
+                    price: `$${lastTrade.price.toFixed(2)}`,
+                };
+            }
+            return sig;
+        }));
+    }, [lastTrade]);
+
     // The fetchSignals function is now responsible for filtering based on the market.
     // So, filteredSignals can directly use the signals state.
     const filteredSignals = signals;
@@ -62,7 +86,24 @@ export function Dashboard() {
             <header className="flex justify-between items-center mb-8 relative z-10">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Market Terminal</h1>
-                    <p className="text-muted-foreground mt-1">Real-time AI analysis & signals</p>
+                    <p className="text-muted-foreground mt-1 flex items-center gap-3">
+                        Real-time AI analysis & signals
+                        {market === "CRYPTO" && (
+                            <span className={cn(
+                                "flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border transition-colors",
+                                status === "connected" ? "bg-green-500/10 text-green-500 border-green-500/20" :
+                                    status === "connecting" ? "bg-yellow-500/10 text-yellow-500 border-yellow-500/20" :
+                                        "bg-red-500/10 text-red-500 border-red-500/20"
+                            )}>
+                                <span className={cn("w-1.5 h-1.5 rounded-full",
+                                    status === "connected" ? "bg-green-500 animate-pulse" :
+                                        status === "connecting" ? "bg-yellow-500 animate-bounce" :
+                                            "bg-red-500"
+                                )} />
+                                {status === "connected" ? "LIVE" : status ? status.toUpperCase() : "DISCONNECTED"}
+                            </span>
+                        )}
+                    </p>
                 </div>
                 <div className="flex items-center gap-4">
                     <button

@@ -22,11 +22,36 @@ services:
       - "8000:8000"
     environment:
       - YFINANCE_CACHE_DIR=/tmp/cache
+      - REDIS_URL=redis://redis:6379/0
     volumes:
       - ./apps/ai-engine:/app
+    networks:
+      - yukti-network
+
+  data-ingestion:
+    build:
+      context: ./apps/data-ingestion
+      dockerfile: Dockerfile
+    # restart: always # Uncomment for production auto-restart
+    environment:
+      - REDIS_ADDR=redis:6379
+    depends_on:
+      - redis
+    networks:
+      - yukti-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
     networks:
       - yukti-network
 
 networks:
   yukti-network:
     driver: bridge
+
+volumes:
+  redis_data:

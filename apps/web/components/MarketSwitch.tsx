@@ -3,7 +3,7 @@
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 
-export type MarketRegion = "IN" | "US";
+export type MarketRegion = "IN" | "US" | "CRYPTO";
 
 interface MarketSwitchProps {
     currentMarket: MarketRegion;
@@ -45,6 +45,23 @@ export function MarketSwitch({ currentMarket, onChange }: MarketSwitchProps) {
                     />
                 )}
                 Wall Street (US)
+            </button>
+
+            <button
+                onClick={() => onChange("CRYPTO")}
+                className={cn(
+                    "relative px-4 py-1.5 text-sm font-medium rounded-full transition-colors duration-200 z-10",
+                    currentMarket === "CRYPTO" ? "text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                )}
+            >
+                {currentMarket === "CRYPTO" && (
+                    <motion.div
+                        layoutId="market-pill"
+                        className="absolute inset-0 bg-primary rounded-full -z-10"
+                        transition={{ type: "spring", bounce: 0.2, duration: 0.6 }}
+                    />
+                )}
+                Crypto
             </button>
         </div>
     );

@@ -1,5 +1,7 @@
 "use client";
 
+import { useState, useEffect, useRef } from "react";
+
 import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { TrendingUp, TrendingDown, Minus, Activity, ArrowRight } from "lucide-react";
@@ -44,6 +46,19 @@ export function SignalCard({ data, onClick }: SignalCardProps) {
             ? <TrendingDown className="w-5 h-5" />
             : <Minus className="w-5 h-5" />;
 
+    // Flash effect on price change
+    const [flash, setFlash] = useState<"up" | "down" | null>(null);
+    const prevPrice = useRef(data.price);
+
+    useEffect(() => {
+        if (prevPrice.current !== data.price) {
+            setFlash("up"); // Simple flash for now
+            const timer = setTimeout(() => setFlash(null), 300);
+            prevPrice.current = data.price;
+            return () => clearTimeout(timer);
+        }
+    }, [data.price]);
+
     return (
         <motion.div
             whileHover={{ y: -4, scale: 1.01 }}
@@ -56,7 +71,13 @@ export function SignalCard({ data, onClick }: SignalCardProps) {
                 isBuy ? "bg-success" : isSell ? "bg-danger" : "bg-primary"
             )} />
 
-            <div className="relative glass rounded-xl p-5 h-full flex flex-col justify-between border border-border/50 hover:border-border transition-colors">
+            {/* Flash Overlay */}
+            <div className={cn(
+                "absolute inset-0 rounded-xl transition-opacity duration-300 pointer-events-none z-0",
+                flash ? "opacity-20 bg-white" : "opacity-0"
+            )} />
+
+            <div className="relative glass rounded-xl p-5 h-full flex flex-col justify-between border border-border/50 hover:border-border transition-colors z-10">
                 {/* Header */}
                 <div className="flex justify-between items-start mb-4">
                     <div>

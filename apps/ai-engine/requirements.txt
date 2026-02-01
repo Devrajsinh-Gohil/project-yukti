@@ -8,4 +8,6 @@ pandas
 numpy
 httpx
 yfinance
+redis
 
+sse-starlette
