@@ -29,8 +29,8 @@ async def health_check():
         "version": "0.1.0"
     }
 
-from models import MarketRegion, SignalResponse, ChartResponse
-from services.signal_generator import get_market_signals, get_chart_data
+from models import MarketRegion, SignalResponse, ChartResponse, NewsResponse
+from services.signal_generator import get_market_signals, get_chart_data, get_ticker_news
 
 # ... imports ...
 
@@ -52,6 +52,13 @@ async def get_chart(ticker: str, range: str = "1mo"):
     Range options: 1m, 5m, 15m, 1H, D, 1M, 1Y, ALL
     """
     return get_chart_data(ticker, range)
+
+@app.get("/api/v1/news/{ticker}", response_model=NewsResponse)
+async def get_news(ticker: str):
+    """
+    Fetch real-time news for a ticker.
+    """
+    return get_ticker_news(ticker)
 
 import requests
 from pydantic import BaseModel

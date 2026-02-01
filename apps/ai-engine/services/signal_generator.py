@@ -4,7 +4,7 @@ import numpy as np
 import random
 from typing import List
 from datetime import datetime
-from models import Signal, SignalAction, SignalDriver, MarketRegion, SignalResponse, ChartResponse, ChartDataPoint
+from models import Signal, SignalAction, SignalDriver, MarketRegion, SignalResponse, ChartResponse, ChartDataPoint, NewsItem, NewsResponse
 
 # ... existing code ...
 
@@ -200,3 +200,50 @@ def get_market_signals(market: MarketRegion) -> SignalResponse:
         market=market,
         count=len(signals)
     )
+
+def get_ticker_news(ticker: str) -> NewsResponse:
+    try:
+        # Normalize ticker
+        search_ticker = ticker
+        if ".NS" not in ticker and ticker in [t.replace(".NS", "") for t in TICKERS_IN]:
+            search_ticker = f"{ticker}.NS"
+            
+        stock = yf.Ticker(search_ticker)
+        news_data = stock.news
+        
+        items = []
+        for n in news_data:
+            # Check if content is nested (some versions)
+            item = n.get('content', n)
+            
+            sentiment = random.choice(["positive", "negative", "neutral"]) # Placeholder
+            
+            # Map Correct Keys
+            provider = item.get('provider', {})
+            source_name = provider.get('displayName', 'Yahoo Finance')
+            
+            # URL: Try clickThrough -> canonical
+            url_obj = item.get('clickThroughUrl') or item.get('canonicalUrl') or {}
+            url = url_obj.get('url', '#')
+            
+            # Title
+            title = item.get('title', 'No Title')
+            
+            # Time: pubDate is widely used now
+            published = item.get('pubDate') or datetime.now().isoformat()
+            
+            items.append(NewsItem(
+                id=item.get('id', str(random.randint(1000,9999))),
+                title=title,
+                source=source_name,
+                published_at=published,
+                url=url,
+                sentiment=sentiment,
+                tickers=[ticker]
+            ))
+            
+        return NewsResponse(ticker=ticker, news=items)
+            
+    except Exception as e:
+        print(f"Error fetching news for {ticker}: {e}")
+        return NewsResponse(ticker=ticker, news=[])

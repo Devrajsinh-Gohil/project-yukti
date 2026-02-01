@@ -1,15 +1,28 @@
 "use client";
 
-import { createChart, ColorType, IChartApi, AreaSeries, CandlestickSeries, HistogramSeries, LineSeries, Time, WhitespaceData } from "lightweight-charts";
+import { createChart, ColorType, IChartApi, AreaSeries, CandlestickSeries, HistogramSeries, LineSeries, Time, MouseEventParams, ITimeScaleApi } from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
-import { IndicatorData } from "@/lib/indicators";
+import { IndicatorResult } from "@/lib/indicators";
+
+interface Point {
+    time: Time;
+    price: number;
+}
+
+interface Drawing {
+    id: string;
+    type: "trendline" | "ray" | "fib" | "rect" | "circle" | "text" | "measure";
+    p1: Point;
+    p2: Point;
+    text?: string;
+}
 
 interface TechnicalChartProps {
-    data?: any[]; // Flexible data
+    data?: any[];
     volumeData?: { time: string; value: number; color: string }[];
     predictionData?: { time: string; value: number }[];
-    indicators?: IndicatorData[];
-    mode?: "candle" | "area"; // New prop to switch modes
+    indicators?: IndicatorResult[];
+    mode?: "candle" | "area" | "line" | "heikin"; // Extended modes
     colors?: {
         backgroundColor?: string;
         textColor?: string;
@@ -19,31 +32,68 @@ interface TechnicalChartProps {
         areaTopColor?: string;
         areaBottomColor?: string;
     };
+    activeTool?: string;
+    onDrawingComplete?: () => void;
 }
 
-export function TechnicalChart({ data, volumeData, predictionData, indicators, colors, mode = "candle" }: TechnicalChartProps) {
+export function TechnicalChart({
+    data,
+    volumeData,
+    predictionData,
+    indicators = [],
+    colors,
+    mode = "candle",
+    activeTool = "cursor",
+    onDrawingComplete
+}: TechnicalChartProps) {
     const chartContainerRef = useRef<HTMLDivElement>(null);
-    const [tooltipData, setTooltipData] = useState<{
-        time: string;
-        open: string;
-        high: string;
-        low: string;
-        close: string;
-        change: string;
-        changeColor: string;
-    } | null>(null);
+    const chartRefs = useRef<IChartApi[]>([]);
+    const mainChartRef = useRef<IChartApi | null>(null);
+    const mainSeriesRef = useRef<any>(null);
+
+    const [drawings, setDrawings] = useState<Drawing[]>([]);
+    const [currentDrawing, setCurrentDrawing] = useState<Partial<Drawing> | null>(null);
+    const [isChartReady, setIsChartReady] = useState(false);
+    const [_, setForceUpdate] = useState(0);
+
+    const overlays = indicators.filter(i => i.pane === "overlay");
+    const separatePanes = indicators.filter(i => i.pane === "separate");
+
+    // Handle Delete (Clear All)
+    useEffect(() => {
+        if (activeTool === 'delete') {
+            setDrawings([]);
+            if (onDrawingComplete) onDrawingComplete();
+        }
+    }, [activeTool, onDrawingComplete]);
 
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
-        const chart = createChart(chartContainerRef.current, {
+        chartContainerRef.current.innerHTML = "";
+        chartRefs.current = [];
+        setIsChartReady(false);
+
+        const mainWrapper = document.createElement("div");
+        mainWrapper.style.flex = "1";
+        mainWrapper.style.width = "100%";
+        mainWrapper.style.position = "relative";
+        mainWrapper.style.minHeight = "300px";
+        chartContainerRef.current.appendChild(mainWrapper);
+
+        const chartDiv = document.createElement("div");
+        chartDiv.style.width = "100%";
+        chartDiv.style.height = "100%";
+        mainWrapper.appendChild(chartDiv);
+
+        const mainChart = createChart(chartDiv, {
             layout: {
                 background: { type: ColorType.Solid, color: colors?.backgroundColor || "transparent" },
                 textColor: colors?.textColor || "#94A3B8",
                 attributionLogo: false,
             },
-            width: chartContainerRef.current.clientWidth,
-            height: chartContainerRef.current.clientHeight,
+            width: mainWrapper.clientWidth,
+            height: mainWrapper.clientHeight || 500,
             grid: {
                 vertLines: { color: "rgba(255, 255, 255, 0.05)" },
                 horzLines: { color: "rgba(255, 255, 255, 0.05)" },
@@ -57,79 +107,53 @@ export function TechnicalChart({ data, volumeData, predictionData, indicators, c
                 borderColor: "rgba(255, 255, 255, 0.1)",
             },
             crosshair: {
-                vertLine: {
-                    labelVisible: true,
-                    style: 0, // Solid
-                    width: 1,
-                    color: "rgba(255, 255, 255, 0.2)",
-                },
-                horzLine: {
-                    labelVisible: true,
-                    style: 0, // Solid
-                    width: 1,
-                    color: "rgba(255, 255, 255, 0.2)",
-                },
+                mode: 1,
             },
         });
+        chartRefs.current.push(mainChart);
+        mainChartRef.current = mainChart;
 
+        // Series Logic
         let mainSeries: any;
+        const seriesData = (data && data.length > 0) ? data : [];
 
         if (mode === "area") {
-            mainSeries = chart.addSeries(AreaSeries, {
+            mainSeries = mainChart.addSeries(AreaSeries, {
                 lineColor: colors?.lineColor || "#D4AF37",
                 topColor: colors?.areaTopColor || "rgba(212, 175, 55, 0.4)",
                 bottomColor: colors?.areaBottomColor || "rgba(212, 175, 55, 0)",
             });
-            const areaData = (data && data.length > 0) ? data.map(d => ({
-                time: d.time,
-                value: d.value ?? d.close ?? 0
-            })) : [];
-
-            if (areaData.length > 0) mainSeries.setData(areaData);
-            else mainSeries.setData(generateMockAreaData());
+            mainSeries.setData(seriesData.map((d: any) => ({ time: d.time, value: d.value ?? d.close ?? 0 })));
+        } else if (mode === "line") {
+            mainSeries = mainChart.addSeries(LineSeries, {
+                color: colors?.lineColor || "#3B82F6",
+                lineWidth: 2,
+            });
+            mainSeries.setData(seriesData.map((d: any) => ({ time: d.time, value: d.value ?? d.close ?? 0 })));
         } else {
-            mainSeries = chart.addSeries(CandlestickSeries, {
+            // Candle or Heikin (Handle heikin calculation ideally before passing, but assuming 'candle' style for now)
+            mainSeries = mainChart.addSeries(CandlestickSeries, {
                 upColor: colors?.upColor || "#4ADE80",
                 downColor: colors?.downColor || "#FB7185",
                 borderVisible: false,
                 wickUpColor: colors?.upColor || "#4ADE80",
                 wickDownColor: colors?.downColor || "#FB7185",
             });
-            const initialData = (data && data.length > 0) ? data : generateMockCandleData();
-            mainSeries.setData(initialData);
+            mainSeries.setData(seriesData);
         }
+        mainSeriesRef.current = mainSeries;
 
-        // Volume Series (Overlay)
         if (volumeData) {
-            const volumeSeries = chart.addSeries(HistogramSeries, {
+            const volumeSeries = mainChart.addSeries(HistogramSeries, {
                 priceFormat: { type: 'volume' },
                 priceScaleId: '',
             });
-            volumeSeries.priceScale().applyOptions({
-                scaleMargins: { top: 0.8, bottom: 0 },
-            });
+            volumeSeries.priceScale().applyOptions({ scaleMargins: { top: 0.8, bottom: 0 } });
             volumeSeries.setData(volumeData);
         }
 
-        // Indicators (Overlays)
-        if (indicators) {
-            indicators.forEach(ind => {
-                if (ind.type === "overlay") {
-                    const lineSeries = chart.addSeries(LineSeries, {
-                        color: ind.color,
-                        lineWidth: 1,
-                        crosshairMarkerVisible: false,
-                        lastValueVisible: false, // Don't clutter axis
-                        priceLineVisible: false
-                    });
-                    lineSeries.setData(ind.data as any);
-                }
-            });
-        }
-
-        // Prediction Line
         if (predictionData) {
-            const predSeries = chart.addSeries(AreaSeries, {
+            const predSeries = mainChart.addSeries(AreaSeries, {
                 lineColor: "#D4AF37",
                 topColor: "rgba(212, 175, 55, 0.2)",
                 bottomColor: "rgba(212, 175, 55, 0)",
@@ -139,158 +163,332 @@ export function TechnicalChart({ data, volumeData, predictionData, indicators, c
             predSeries.setData(predictionData);
         }
 
-        chart.timeScale().fitContent();
-
-        // Crosshair Handler
-        chart.subscribeCrosshairMove((param) => {
-            if (
-                param.point === undefined ||
-                !param.time ||
-                param.point.x < 0 ||
-                param.point.x > chartContainerRef.current!.clientWidth ||
-                param.point.y < 0 ||
-                param.point.y > chartContainerRef.current!.clientHeight
-            ) {
-                setTooltipData(null);
-            } else {
-                // Get data from the main series
-                const dataPoint = param.seriesData.get(mainSeries) as any;
-                if (dataPoint) {
-                    const open = dataPoint.open !== undefined ? dataPoint.open : dataPoint.value;
-                    const close = dataPoint.close !== undefined ? dataPoint.close : dataPoint.value;
-                    const high = dataPoint.high !== undefined ? dataPoint.high : open;
-                    const low = dataPoint.low !== undefined ? dataPoint.low : open;
-
-                    // Calculate Change
-                    const changeVal = close - open;
-                    const changePercent = ((changeVal / open) * 100).toFixed(2);
-                    const isUp = changeVal >= 0;
-
-                    // Format Time
-                    let dateStr = "";
-                    if (typeof param.time === 'string') {
-                        // "2024-03-15" format
-                        const date = new Date(param.time);
-                        date.setDate(date.getDate() + 1); // Fix timezone offset causing previous day
-                        dateStr = date.toLocaleDateString('en-US', {
-                            month: 'short', day: 'numeric', year: 'numeric'
-                        });
-                    } else {
-                        // Timestamp format
-                        dateStr = new Date(Number(param.time) * 1000).toLocaleString('en-US', {
-                            month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
-                        });
-                    }
-
-                    setTooltipData({
-                        time: dateStr,
-                        open: open.toFixed(2),
-                        high: high.toFixed(2),
-                        low: low.toFixed(2),
-                        close: close.toFixed(2),
-                        change: `${isUp ? '+' : ''}${changePercent}%`,
-                        changeColor: isUp ? "text-green-400" : "text-red-400"
-                    });
+        overlays.forEach(ind => {
+            ind.series.forEach(s => {
+                if (s.type === 'Line') {
+                    const line = mainChart.addSeries(LineSeries, { ...s.options, crosshairMarkerVisible: false } as any);
+                    line.setData(s.data as any);
                 }
-            }
+            });
         });
 
+        separatePanes.forEach((paneInd) => {
+            const subContainer = document.createElement("div");
+            subContainer.style.height = "160px";
+            subContainer.style.width = "100%";
+            subContainer.style.borderTop = "1px solid rgba(255,255,255,0.05)";
+            chartContainerRef.current?.appendChild(subContainer);
+
+            const subChart = createChart(subContainer, {
+                layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#64748B", attributionLogo: false },
+                width: subContainer.clientWidth,
+                height: subContainer.clientHeight,
+                grid: { vertLines: { visible: false }, horzLines: { color: "rgba(255, 255, 255, 0.05)" } },
+                timeScale: { visible: false, timeVisible: true },
+                rightPriceScale: { borderColor: "rgba(255, 255, 255, 0.1)" },
+            });
+            chartRefs.current.push(subChart);
+
+            paneInd.series.forEach(s => {
+                const SeriesClass = s.type === 'Histogram' ? HistogramSeries : LineSeries;
+                const seriesObj = subChart.addSeries(SeriesClass, s.options as any);
+                seriesObj.setData(s.data as any);
+            });
+        });
+
+        const mainTimeScale = mainChart.timeScale();
+        const syncCharts = (timeRange: any) => {
+            setForceUpdate(n => n + 1);
+            chartRefs.current.forEach(chart => {
+                if (chart === mainChart) return;
+                chart.timeScale().setVisibleLogicalRange(timeRange);
+            });
+        };
+        mainTimeScale.subscribeVisibleLogicalRangeChange(syncCharts);
+        mainChart.timeScale().fitContent();
+
         const resizeObserver = new ResizeObserver((entries) => {
-            for (const entry of entries) {
-                if (entry.contentRect) {
-                    chart.applyOptions({
-                        width: entry.contentRect.width,
-                        height: entry.contentRect.height
-                    });
-                }
-            }
+            const containerWidth = chartContainerRef.current?.clientWidth || 800;
+            const containerHeight = chartContainerRef.current?.clientHeight || 600;
+            const subHeight = 160;
+            const totalSubHeight = separatePanes.length * subHeight;
+            const mainHeight = Math.max(300, containerHeight - totalSubHeight);
+            mainChart.applyOptions({ width: containerWidth, height: mainHeight });
         });
         resizeObserver.observe(chartContainerRef.current);
 
+        setIsChartReady(true);
+
         return () => {
             resizeObserver.disconnect();
-            chart.remove();
+            chartRefs.current.forEach(c => c.remove());
         };
-    }, [data, volumeData, predictionData, colors, mode]);
+
+    }, [data, indicators, mode, colors]);
+
+
+    // --- Drawing Renderers ---
+
+    const renderFibonacci = (d: Drawing | Partial<Drawing>) => {
+        if (!d.p1 || !d.p2 || !mainChartRef.current || !mainSeriesRef.current) return null;
+        const chart = mainChartRef.current;
+        const series = mainSeriesRef.current;
+        const x1 = chart.timeScale().timeToCoordinate(d.p1.time);
+        const y1 = series.coordinateToPrice(d.p1.price) ? series.priceToCoordinate(d.p1.price) : null;
+        const x2 = chart.timeScale().timeToCoordinate(d.p2.time);
+        const y2 = series.coordinateToPrice(d.p2.price) ? series.priceToCoordinate(d.p2.price) : null;
+
+        // Note: coordinateToPrice returns price. priceToCoordinate returns coordinate.
+        // My previous fix was 'series.coordinateToPrice(y)' in click handler.
+        // Here we have PRICE in drawing, need COORDINATE. So series.priceToCoordinate(price).
+        // Correct usage: series.priceToCoordinate(d.p1.price).
+
+        const cy1 = series.priceToCoordinate(d.p1.price);
+        const cy2 = series.priceToCoordinate(d.p2.price);
+
+        if (x1 === null || cy1 === null || x2 === null || cy2 === null) return null;
+
+        const levels = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+        const priceDiff = d.p2.price - d.p1.price;
+
+        return (
+            <g key={d.id} className="group">
+                <line x1={x1} y1={cy1} x2={x2} y2={cy2} stroke="#3B82F6" strokeWidth="1" strokeDasharray="4 4" className="opacity-50" />
+                {levels.map(level => {
+                    const priceLevel = d.p1!.price + (priceDiff * level);
+                    const yLevel = series.priceToCoordinate(priceLevel);
+                    if (yLevel === null) return null;
+                    return (
+                        <g key={level}>
+                            <line
+                                x1={x1} y1={yLevel} x2={x2} y2={yLevel}
+                                stroke={level === 0 || level === 1 ? "#94A3B8" : "#D4AF37"}
+                                strokeWidth={level === 0.5 ? 2 : 1}
+                                className="opacity-80"
+                            />
+                            <text
+                                x={x2 + 5} y={yLevel + 3}
+                                fill={level === 0 || level === 1 ? "#94A3B8" : "#D4AF37"}
+                                fontSize="10"
+                                className="font-mono select-none"
+                            >
+                                {level.toFixed(3)} ({priceLevel.toFixed(2)})
+                            </text>
+                        </g>
+                    );
+                })}
+            </g>
+        );
+    };
+
+    const renderMeasure = (d: Drawing | Partial<Drawing>) => {
+        if (!d.p1 || !d.p2 || !mainChartRef.current || !mainSeriesRef.current) return null;
+        const chart = mainChartRef.current;
+        const series = mainSeriesRef.current;
+
+        const x1 = chart.timeScale().timeToCoordinate(d.p1.time);
+        const y1 = series.priceToCoordinate(d.p1.price);
+        const x2 = chart.timeScale().timeToCoordinate(d.p2.time);
+        const y2 = series.priceToCoordinate(d.p2.price);
+
+        if (x1 === null || y1 === null || x2 === null || y2 === null) return null;
+
+        const width = x2 - x1;
+        const height = y2 - y1;
+        const priceChange = d.p2.price - d.p1.price;
+        const percentChange = (priceChange / d.p1.price) * 100;
+
+        const bgColor = priceChange >= 0 ? "rgba(74, 222, 128, 0.1)" : "rgba(251, 113, 133, 0.1)";
+        const strokeColor = priceChange >= 0 ? "#4ADE80" : "#FB7185";
+
+        return (
+            <g key={d.id}>
+                {/* Visual Box */}
+                <rect
+                    x={Math.min(x1, x2)} y={Math.min(y1, y2)}
+                    width={Math.abs(width)} height={Math.abs(height)}
+                    fill={bgColor}
+                    stroke={strokeColor}
+                    strokeWidth="1"
+                    strokeDasharray="2 2"
+                />
+
+                {/* Info Label */}
+                <foreignObject x={x2 + 10} y={y2 - 25} width="120" height="60">
+                    <div className="bg-[#0B0E11] border border-white/10 rounded p-2 shadow-xl flex flex-col gap-0.5 min-w-max">
+                        <span className="text-[10px] text-muted-foreground font-mono leading-none">{percentChange.toFixed(2)}%</span>
+                        <span className="text-[10px] font-bold text-white font-mono leading-none">{priceChange.toFixed(2)}</span>
+                    </div>
+                </foreignObject>
+            </g>
+        );
+    };
+
+    const renderDrawing = (d: Drawing | Partial<Drawing>) => {
+        if (!d.p1 || !mainChartRef.current || !mainSeriesRef.current) return null;
+        if (d.type === 'fib') return renderFibonacci(d);
+        if (d.type === 'measure') return renderMeasure(d);
+
+        const chart = mainChartRef.current;
+        const series = mainSeriesRef.current;
+        const x1 = chart.timeScale().timeToCoordinate(d.p1.time);
+        const y1 = series.priceToCoordinate(d.p1.price);
+
+        if (x1 === null || y1 === null) return null;
+
+        if (d.type === 'text' && d.text) {
+            return (
+                <text key={d.id} x={x1} y={y1} fill={colors?.textColor || "#fff"} fontSize="12" className="pointer-events-none select-none font-sans">
+                    {d.text}
+                </text>
+            );
+        }
+
+        // For other shapes check p2
+        if (!d.p2) return null;
+        const x2 = chart.timeScale().timeToCoordinate(d.p2.time);
+        const y2 = series.priceToCoordinate(d.p2.price);
+        if (x2 === null || y2 === null) return null;
+
+        if (d.type === 'rect') {
+            const width = Math.abs(x2 - x1);
+            const height = Math.abs(y2 - y1);
+            const x = Math.min(x1, x2);
+            const y = Math.min(y1, y2);
+            return (
+                <rect
+                    key={d.id}
+                    x={x} y={y} width={width} height={height}
+                    fill="rgba(59, 130, 246, 0.1)"
+                    stroke="#3B82F6"
+                    strokeWidth="2"
+                />
+            );
+        }
+
+        if (d.type === 'circle') {
+            const cx = (x1 + x2) / 2;
+            const cy = (y1 + y2) / 2;
+            const rx = Math.abs(x2 - x1) / 2;
+            const ry = Math.abs(y2 - y1) / 2;
+            return (
+                <ellipse
+                    key={d.id}
+                    cx={cx} cy={cy} rx={rx} ry={ry}
+                    fill="rgba(59, 130, 246, 0.1)"
+                    stroke="#3B82F6"
+                    strokeWidth="2"
+                />
+            );
+        }
+
+        // Default Trendline
+        return (
+            <line
+                key={d.id}
+                x1={x1} y1={y1} x2={x2} y2={y2}
+                stroke="#3B82F6"
+                strokeWidth="2"
+                className="drop-shadow-md"
+            />
+        );
+    };
+
+    // --- Handlers ---
+    const handleChartClick = (e: React.MouseEvent) => {
+        if (activeTool === 'cursor' || activeTool === 'delete' || !mainChartRef.current || !mainSeriesRef.current) return;
+        const chart = mainChartRef.current;
+        const series = mainSeriesRef.current;
+
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const time = chart.timeScale().coordinateToTime(x);
+        const price = series.coordinateToPrice(y);
+
+        if (!time || !price) return;
+
+        // Handle Text Tool - Instant Draw
+        if (activeTool === 'text') {
+            const text = prompt("Enter annotation text:");
+            if (text) {
+                const newDrawing: Drawing = {
+                    id: Date.now().toString(),
+                    type: 'text',
+                    p1: { time, price },
+                    p2: { time, price }, // Dummy p2 for type compatibility
+                    text
+                };
+                setDrawings(prev => [...prev, newDrawing]);
+                if (onDrawingComplete) onDrawingComplete();
+            }
+            return; // Stop processing
+        }
+
+        if (!currentDrawing) {
+            let type: Drawing["type"] = 'trendline';
+            if (activeTool === 'fib') type = 'fib';
+            else if (activeTool === 'rect') type = 'rect';
+            else if (activeTool === 'circle') type = 'circle';
+            else if (activeTool === 'measure') type = 'measure';
+
+            setCurrentDrawing({
+                id: Date.now().toString(),
+                type,
+                p1: { time, price },
+                p2: { time, price }
+            });
+        } else {
+            const newDrawing = { ...currentDrawing, p2: { time, price } } as Drawing;
+            setDrawings(prev => [...prev, newDrawing]);
+            setCurrentDrawing(null);
+            if (onDrawingComplete) onDrawingComplete();
+        }
+    };
+
+    const handleMouseMove = (e: React.MouseEvent) => {
+        if (!currentDrawing || !mainChartRef.current || !mainSeriesRef.current) return;
+        const chart = mainChartRef.current;
+        const series = mainSeriesRef.current;
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const time = chart.timeScale().coordinateToTime(x);
+        const price = series.coordinateToPrice(y);
+
+        if (time && price) {
+            setCurrentDrawing(prev => ({ ...prev, p2: { time, price } }));
+        }
+    };
 
     return (
-        <div className="relative w-full h-full group">
-            <div ref={chartContainerRef} className="w-full h-full" />
+        <div className="w-full h-full flex flex-col bg-[#050505] relative">
+            <div ref={chartContainerRef} className="w-full h-full flex flex-col" />
 
-            {/* Legend / Tooltip Overlay */}
-            <div className="absolute top-4 left-4 z-20 pointer-events-none transition-opacity duration-200">
-                {tooltipData ? (
-                    <div className="glass-strong rounded-lg p-3 border border-white/10 shadow-xl bg-[#0B0E11]/80 backdrop-blur-md">
-                        <div className="flex items-center gap-3 text-xs font-mono mb-2 text-muted-foreground border-b border-white/5 pb-1">
-                            <span>{tooltipData.time}</span>
-                            <span className={tooltipData.changeColor}>{tooltipData.change}</span>
-                        </div>
-                        <div className="grid grid-cols-4 gap-4 text-xs">
-                            <div>
-                                <div className="text-muted-foreground scale-[0.8] origin-left uppercase">Open</div>
-                                <div className="font-semibold text-white">{tooltipData.open}</div>
-                            </div>
-                            <div>
-                                <div className="text-muted-foreground scale-[0.8] origin-left uppercase">High</div>
-                                <div className="font-semibold text-white">{tooltipData.high}</div>
-                            </div>
-                            <div>
-                                <div className="text-muted-foreground scale-[0.8] origin-left uppercase">Low</div>
-                                <div className="font-semibold text-white">{tooltipData.low}</div>
-                            </div>
-                            <div>
-                                <div className="text-muted-foreground scale-[0.8] origin-left uppercase">Close</div>
-                                <div className="font-semibold text-white">{tooltipData.close}</div>
-                            </div>
-                        </div>
-                    </div>
-                ) : (
-                    // Default View: Show last available data point or Title
-                    <div className="glass-strong rounded-lg p-2 border border-white/5 bg-[#0B0E11]/50 backdrop-blur-sm opacity-50">
-                        <span className="text-xs text-muted-foreground">Hover for details</span>
-                    </div>
-                )}
+            <div className="absolute top-2 right-2 z-[60] text-[10px] text-white bg-black/50 px-2 rounded pointer-events-none border border-white/10">
+                Tool: {activeTool} | Drawings: {drawings.length} {currentDrawing ? "| Drawing..." : ""}
             </div>
+
+            {isChartReady && (
+                <div
+                    className="absolute top-0 left-0 z-50 pointer-events-auto"
+                    style={{
+                        width: '100%',
+                        height: '100%',
+                        cursor: activeTool === 'cursor' ? 'default' : 'crosshair',
+                        pointerEvents: activeTool !== 'cursor' ? 'auto' : 'none'
+                    }}
+                    onClick={handleChartClick}
+                    onMouseMove={handleMouseMove}
+                >
+                    <svg className="w-full h-full overflow-visible">
+                        {drawings.map(d => renderDrawing(d))}
+                        {currentDrawing && renderDrawing(currentDrawing)}
+                    </svg>
+                </div>
+            )}
         </div>
     );
-}
-
-function generateMockCandleData() {
-    const currentDate = new Date();
-    const data = [];
-    let price = 1500;
-    for (let i = 0; i < 150; i++) {
-        const time = new Date(currentDate.getTime() - (150 - i) * 60 * 60 * 1000) // Hourly
-            .toISOString() // lightweight-charts expects UNIX timestamp or ISO string depending on version, generic is safer
-            .split("T")[0]; // Actually for daily. For intraday use timestamp. 
-
-        // Using simple logic for mock
-        // Note: lightweight charts string format usually YYYY-MM-DD. For intraday use timestamp (seconds).
-        // Let's use timestamps for versatility.
-        const timeStamp = (Math.floor(currentDate.getTime() / 1000) - (150 - i) * 3600) as Time;
-
-        const volatility = 5;
-        const open = price + (Math.random() - 0.5) * volatility;
-        const close = open + (Math.random() - 0.5) * volatility;
-        const high = Math.max(open, close) + Math.random() * volatility;
-        const low = Math.min(open, close) - Math.random() * volatility;
-
-        price = close;
-
-        data.push({ time: timeStamp, open, high, low, close });
-    }
-    return data;
-}
-
-function generateMockAreaData() {
-    const currentDate = new Date();
-    const data = [];
-    let price = 100;
-    for (let i = 0; i < 100; i++) {
-        const time = (Math.floor(currentDate.getTime() / 1000) - (100 - i) * 86400) as Time;
-        const change = (Math.random() - 0.5) * 5;
-        price += change;
-        data.push({ time, value: price });
-    }
-    return data;
 }

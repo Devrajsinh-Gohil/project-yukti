@@ -50,3 +50,17 @@ class SignalResponse(BaseModel):
     signals: List[Signal]
     market: MarketRegion
     count: int
+
+# --- News Models ---
+class NewsItem(BaseModel):
+    id: str
+    title: str
+    source: str
+    published_at: str
+    url: str
+    sentiment: str = "neutral" 
+    tickers: List[str] = []
+
+class NewsResponse(BaseModel):
+    ticker: str
+    news: List[NewsItem]

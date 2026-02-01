@@ -62,3 +62,24 @@ export async function searchTickers(query: string): Promise<SearchResult[]> {
         return [];
     }
 }
+export interface NewsItem {
+    id: string;
+    title: string;
+    source: string;
+    published_at: string;
+    url: string;
+    sentiment: "positive" | "negative" | "neutral";
+    tickers: string[];
+}
+
+export async function fetchNews(ticker: string): Promise<NewsItem[]> {
+    try {
+        const response = await fetch(`${API_BASE_URL}/news/${ticker}`);
+        if (!response.ok) return [];
+        const data = await response.json();
+        return data.news;
+    } catch (error) {
+        console.error("Failed to fetch news:", error);
+        return [];
+    }
+}
