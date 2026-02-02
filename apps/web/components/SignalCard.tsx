@@ -28,11 +28,15 @@ export interface SignalData {
 interface SignalCardProps {
     data: SignalData;
     onClick: (data: SignalData) => void;
+    showSignals?: boolean;
 }
 
-export function SignalCard({ data, onClick }: SignalCardProps) {
-    const isBuy = data.action === "BUY";
-    const isSell = data.action === "SELL";
+export function SignalCard({ data, onClick, showSignals = true }: SignalCardProps) {
+    // Determine visuals based on showSignals. 
+    // If false, show neutral styling or hidden badges.
+    const isActable = showSignals;
+    const isBuy = isActable && data.action === "BUY";
+    const isSell = isActable && data.action === "SELL";
 
     const accentColor = isBuy
         ? "text-success border-success/20 bg-success/5"
@@ -93,8 +97,8 @@ export function SignalCard({ data, onClick }: SignalCardProps) {
                 {/* Action & Confidence */}
                 <div className="flex items-center justify-between mt-2">
                     <div className={cn("flex items-center space-x-2 px-3 py-1.5 rounded-lg border", accentColor)}>
-                        {signalIcon}
-                        <span className="font-bold tracking-wide text-sm">{data.action}</span>
+                        {showSignals ? signalIcon : <Minus className="w-5 h-5" />}
+                        <span className="font-bold tracking-wide text-sm">{showSignals ? data.action : "ANALYZING"}</span>
                     </div>
 
                     <div className="flex flex-col items-end">

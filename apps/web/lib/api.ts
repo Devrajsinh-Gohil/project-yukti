@@ -27,9 +27,12 @@ export interface ChartDataPoint {
     volume?: number;
 }
 
-export async function fetchChartData(ticker: string, range: string = "1mo"): Promise<ChartDataPoint[]> {
+export async function fetchChartData(ticker: string, range: string = "1mo", interval?: string, signal?: AbortSignal): Promise<ChartDataPoint[]> {
     try {
-        const response = await fetch(`${API_BASE_URL}/chart/${ticker}?range=${range}`);
+        let url = `${API_BASE_URL}/chart/${ticker}?range=${range}`;
+        if (interval) url += `&interval=${interval}`;
+
+        const response = await fetch(url, { signal });
         if (!response.ok) {
             console.warn(`Chart API error: ${response.status}`);
             return [];
@@ -81,5 +84,24 @@ export async function fetchNews(ticker: string): Promise<NewsItem[]> {
     } catch (error) {
         console.error("Failed to fetch news:", error);
         return [];
+    }
+}
+
+export interface SystemStats {
+    cpu_usage: number;
+    memory_usage: number;
+    active_connections: number;
+    total_api_calls: number;
+    uptime_seconds: number;
+}
+
+export async function fetchSystemStats(): Promise<SystemStats | null> {
+    try {
+        const response = await fetch(`${API_BASE_URL}/admin/stats`);
+        if (!response.ok) return null;
+        return await response.json();
+    } catch (error) {
+        console.error("Failed to fetch system stats:", error);
+        return null;
     }
 }

@@ -7,6 +7,7 @@ import { useMarketStream } from "@/hooks/useMarketStream";
 import { SignalCard, SignalData } from "./SignalCard";
 import { useRouter } from "next/navigation";
 import { fetchSignals } from "@/lib/api";
+import { getSystemConfig } from "@/lib/db";
 import { Loader2, Activity as LucideActivity } from "lucide-react";
 import { WatchlistWidget } from "./WatchlistWidget";
 import { UserMenu } from "./UserMenu";
@@ -16,6 +17,7 @@ import { IndicatorMenu } from "./IndicatorMenu";
 export function Dashboard() {
     const [market, setMarket] = useState<MarketRegion>("IN");
     const [signals, setSignals] = useState<SignalData[]>([]);
+    const [showSignals, setShowSignals] = useState(true);
     const [loading, setLoading] = useState(true);
     const router = useRouter();
 
@@ -31,9 +33,18 @@ export function Dashboard() {
     useEffect(() => {
         const loadSignals = async () => {
             setLoading(true);
-            const data = await fetchSignals(market);
-            setSignals(data);
-            setLoading(false);
+            try {
+                const [data, config] = await Promise.all([
+                    fetchSignals(market),
+                    getSystemConfig()
+                ]);
+                setSignals(data);
+                setShowSignals(config.features.showAIInsights);
+            } catch (err) {
+                console.error("Failed to load dashboard data", err);
+            } finally {
+                setLoading(false);
+            }
         };
         loadSignals();
     }, [market]);
@@ -145,6 +156,7 @@ export function Dashboard() {
                                     key={signal.id}
                                     data={signal}
                                     onClick={handleSignalClick}
+                                    showSignals={showSignals}
                                 />
                             ))}
 

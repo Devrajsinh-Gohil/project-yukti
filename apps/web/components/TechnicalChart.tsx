@@ -424,37 +424,22 @@ export function TechnicalChart({
     };
 
     // --- Handlers ---
-    const handleChartClick = (e: React.MouseEvent) => {
-        if (activeTool === 'cursor' || activeTool === 'delete' || !mainChartRef.current || !mainSeriesRef.current) return;
-        const chart = mainChartRef.current;
-        const series = mainSeriesRef.current;
-
-        const rect = e.currentTarget.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
-        const time = chart.timeScale().coordinateToTime(x);
-        const price = series.coordinateToPrice(y);
-
-        if (!time || !price) return;
-
-        // Handle Text Tool - Instant Draw
-        if (activeTool === 'text') {
-            const text = prompt("Enter annotation text:");
-            if (text) {
-                const newDrawing: Drawing = {
-                    id: Date.now().toString(),
-                    type: 'text',
-                    p1: { time, price },
-                    p2: { time, price }, // Dummy p2 for type compatibility
-                    text
-                };
-                setDrawings(prev => [...prev, newDrawing]);
-                if (onDrawingComplete) onDrawingComplete();
-            }
-            return; // Stop processing
+    const handleTextToolClick = (time: Time, price: number) => {
+        const text = prompt("Enter annotation text:");
+        if (text) {
+            const newDrawing: Drawing = {
+                id: Date.now().toString(),
+                type: 'text',
+                p1: { time, price },
+                p2: { time, price }, // Dummy p2 for type compatibility
+                text
+            };
+            setDrawings(prev => [...prev, newDrawing]);
+            if (onDrawingComplete) onDrawingComplete();
         }
+    };
 
+    const handleShapeDrawingClick = (time: Time, price: number) => {
         if (!currentDrawing) {
             let type: Drawing["type"] = 'trendline';
             if (activeTool === 'fib') type = 'fib';
@@ -473,6 +458,27 @@ export function TechnicalChart({
             setDrawings(prev => [...prev, newDrawing]);
             setCurrentDrawing(null);
             if (onDrawingComplete) onDrawingComplete();
+        }
+    };
+
+    const handleChartClick = (e: React.MouseEvent) => {
+        if (activeTool === 'cursor' || activeTool === 'delete' || !mainChartRef.current || !mainSeriesRef.current) return;
+        const chart = mainChartRef.current;
+        const series = mainSeriesRef.current;
+
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = e.clientX - rect.left;
+        const y = e.clientY - rect.top;
+
+        const time = chart.timeScale().coordinateToTime(x);
+        const price = series.coordinateToPrice(y);
+
+        if (!time || !price) return;
+
+        if (activeTool === 'text') {
+            handleTextToolClick(time, price);
+        } else {
+            handleShapeDrawingClick(time, price);
         }
     };
 
@@ -501,16 +507,21 @@ export function TechnicalChart({
             </div>
 
             {isChartReady && (
-                <div
-                    className="absolute top-0 left-0 z-50 pointer-events-auto"
+                <button
+                    type="button"
+                    className="absolute top-0 left-0 z-50 pointer-events-auto w-full h-full appearance-none focus:outline-none"
                     style={{
-                        width: '100%',
-                        height: '100%',
                         cursor: activeTool === 'cursor' ? 'default' : 'crosshair',
                         pointerEvents: activeTool !== 'cursor' ? 'auto' : 'none'
                     }}
                     onClick={handleChartClick}
                     onMouseMove={handleMouseMove}
+                    onKeyDown={(e) => {
+                        if (e.key === 'Escape' && activeTool !== 'cursor') {
+                            if (onDrawingComplete) onDrawingComplete();
+                        }
+                    }}
+                    aria-label="Chart Drawing Area"
                 >
                     <svg className="w-full h-full overflow-visible">
                         {/* eslint-disable-next-line react-hooks/refs */}
@@ -518,7 +529,7 @@ export function TechnicalChart({
                         {/* eslint-disable-next-line react-hooks/refs */}
                         {currentDrawing && renderDrawing(currentDrawing)}
                     </svg>
-                </div>
+                </button>
             )}
         </div>
     );

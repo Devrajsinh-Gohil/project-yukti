@@ -65,3 +65,10 @@ class NewsItem(BaseModel):
 class NewsResponse(BaseModel):
     ticker: str
     news: List[NewsItem]
+
+class SystemStats(BaseModel):
+    cpu_usage: float
+    memory_usage: float
+    active_connections: int
+    total_api_calls: int
+    uptime_seconds: int
