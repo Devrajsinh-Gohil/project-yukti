@@ -53,18 +53,17 @@ export function WatchlistPanel({ currentTicker }: { currentTicker?: string }) {
     const handleRemoveTicker = async (e: React.MouseEvent, ticker: string) => {
         e.stopPropagation();
         if (!user || !activeListId) return;
+
         try {
             await removeFromWatchlist(user.uid, activeListId, ticker);
-            // Optimistic update
-            setWatchlists(prev => prev.map(list => {
-                if (list.id === activeListId) {
-                    return { ...list, tickers: list.tickers.filter(t => t !== ticker) };
-                }
-                return list;
-            }));
+            updateWatchlistsAfterRemoval(activeListId, ticker);
         } catch (error) {
             console.error("Failed to remove ticker", error);
         }
+    };
+
+    const updateWatchlistsAfterRemoval = (listId: string, tickerToRemove: string) => {
+        setWatchlists(prev => removeTickerFromList(prev, listId, tickerToRemove));
     };
 
     const activeList = watchlists.find(l => l.id === activeListId);
@@ -133,8 +132,16 @@ export function WatchlistPanel({ currentTicker }: { currentTicker?: string }) {
                             <div
                                 key={ticker}
                                 onClick={() => router.push(`/terminal/${ticker}`)}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        e.preventDefault();
+                                        router.push(`/terminal/${ticker}`);
+                                    }
+                                }}
                                 className={cn(
-                                    "group flex items-center justify-between p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer transition-colors",
+                                    "group flex items-center justify-between p-3 border-b border-white/5 hover:bg-white/5 cursor-pointer transition-colors focus:outline-none focus:bg-white/10",
                                     currentTicker === ticker ? "bg-primary/5 border-l-2 border-l-primary" : "border-l-2 border-l-transparent"
                                 )}
                             >
@@ -163,4 +170,11 @@ export function WatchlistPanel({ currentTicker }: { currentTicker?: string }) {
             </div>
         </div>
     );
+}
+
+function removeTickerFromList(watchlists: Watchlist[], listId: string, ticker: string): Watchlist[] {
+    return watchlists.map(list => {
+        if (list.id !== listId) return list;
+        return { ...list, tickers: list.tickers.filter(t => t !== ticker) };
+    });
 }

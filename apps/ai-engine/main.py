@@ -4,7 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import asyncio
 from services.mq_listener import listen_to_market_data
-from routes import stream
+from services.mq_listener import listen_to_market_data
+from routes import stream, admin
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -12,7 +13,7 @@ async def lifespan(app: FastAPI):
     task = asyncio.create_task(listen_to_market_data())
     yield
     # Shutdown logic (if any)
-    # task.cancel()
+    task.cancel()
 
 app = FastAPI(
     title="Project Yukti AI Engine",
@@ -36,6 +37,7 @@ app.add_middleware(
 )
 
 app.include_router(stream.router, prefix="/api/v1")
+app.include_router(admin.router, prefix="/api/v1/admin")
 
 @app.get("/")
 async def health_check():
@@ -62,12 +64,13 @@ async def get_signals(market: MarketRegion = MarketRegion.IN):
     return get_market_signals(market)
 
 @app.get("/api/v1/chart/{ticker}", response_model=ChartResponse)
-async def get_chart(ticker: str, range: str = "1mo"):
+async def get_chart(ticker: str, range: str = "1mo", interval: str = None):
     """
     Fetch historical chart data for a ticker.
-    Range options: 1m, 5m, 15m, 1H, D, 1M, 1Y, ALL
+    Range options: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
+    Interval options: 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo
     """
-    return get_chart_data(ticker, range)
+    return get_chart_data(ticker, range, interval)
 
 @app.get("/api/v1/news/{ticker}", response_model=NewsResponse)
 async def get_news(ticker: str):
@@ -76,7 +79,7 @@ async def get_news(ticker: str):
     """
     return get_ticker_news(ticker)
 
-import requests
+import httpx
 from pydantic import BaseModel
 from typing import List
 
@@ -97,12 +100,18 @@ async def search_ticker(q: str):
     if not q:
         return {"results": []}
     
-    url = f"https://query1.finance.yahoo.com/v1/finance/search?q={q}&quotesCount=10&newsCount=0"
+    url = "https://query1.finance.yahoo.com/v1/finance/search"
+    params = {
+        "q": q,
+        "quotesCount": 10,
+        "newsCount": 0
+    }
     headers = {'User-Agent': 'Mozilla/5.0'}
     
     try:
-        resp = requests.get(url, headers=headers)
-        data = resp.json()
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, params=params, headers=headers)
+            data = resp.json()
         
         items = []
         if 'quotes' in data:

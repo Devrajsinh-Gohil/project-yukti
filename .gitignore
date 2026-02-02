@@ -42,3 +42,15 @@ venv/
 .venv/
 env/
 *.egg-info/
+
+# Docker
+*.dockerignore
+Dockerfile
+
+# Docker Compose
+docker-compose.yml
+docker-compose.yaml
+
+# SonarQube
+.scannerwork
+sonar-project.properties

@@ -21,8 +21,9 @@ class StreamBroadcaster:
             while True:
                 data = await queue.get()
                 yield data
-        except asyncio.CancelledError:
+        except asyncio.CancelledError: # NOSONAR
             self.subscribers.remove(queue)
+            raise
 
     def publish(self, data):
         for queue in self.subscribers:
@@ -47,7 +48,6 @@ async def listen_to_market_data():
 
             async for message in pubsub.listen():
                 if message["type"] in ["message", "pmessage"]:
-                    channel = message["channel"]
                     data = message["data"]
                     
                     try:

@@ -27,43 +27,159 @@ def calculate_rsi(series, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def get_chart_data(ticker: str, range_filter: str) -> ChartResponse:
-    # Map range to yfinance period & interval
-    # Ranges: 1m, 5m, 15m, 1H, 4H, D, 1W, 1M, 1Y, 5Y, ALL
-    # yf periods: 1d, 5d, 1mo, 3mo, 6mo, 1y, 2y, 5y, 10y, ytd, max
-    # yf intervals: 1m, 2m, 5m, 15m, 30m, 60m, 90m, 1h, 1d, 5d, 1wk, 1mo, 3mo
+from datetime import timedelta, timezone
+
+def fetch_crypto_history(ticker: str, interval: str, period: str = "1mo") -> List[ChartDataPoint]:
+    # Map Ticker to Binance Symbol (BTC-USD -> BTCUSDT)
+    symbol = ticker.replace("-", "").replace("USD", "USDT")
     
-    period = "1mo"
-    interval = "1d"
+    # Map Interval (yfinance -> binance)
+    binance_interval = interval
+    if interval == "1wk": binance_interval = "1w"
+    if interval == "1mo": binance_interval = "1M"
+    if interval == "max": binance_interval = "1w" 
+
+    # Calculate Start Time based on Period
+    now = datetime.now(timezone.utc)
+    delta = timedelta(days=30) # Default 1mo
     
-    if range_filter == "1m":
-        period = "1d"
-        interval = "1m"
-    elif range_filter == "5m":
-        period = "1d"
-        interval = "5m"
-    elif range_filter == "15m":
-        period = "5d"
-        interval = "15m"
-    elif range_filter == "1H":
-         period = "1mo" # 1 month of hourly data
-         interval = "1h"
-    elif range_filter == "4H":
-         period = "3mo" # yfinance doesn't natively support 4h, use 1h and we could aggregate or just return 1h
-         interval = "1h" # Fallback to 1h
-    elif range_filter == "D":
-        period = "1y"
-        interval = "1d"
-    elif range_filter == "1Y":
-        period = "1y"
-        interval = "1d"
-    elif range_filter == "ALL":
-        period = "max"
-        interval = "1wk" # Efficient for all time
+    if period == "1d": delta = timedelta(days=1)
+    elif period == "5d": delta = timedelta(days=5)
+    elif period == "1mo": delta = timedelta(days=30)
+    elif period == "3mo": delta = timedelta(days=90)
+    elif period == "6mo": delta = timedelta(days=180)
+    elif period == "1y": delta = timedelta(days=365)
+    elif period == "2y": delta = timedelta(days=730)
+    elif period == "5y": delta = timedelta(days=1825)
+    elif period == "max": delta = timedelta(days=365*5)
+    elif period == "ytd": delta = now - datetime(now.year, 1, 1, tzinfo=timezone.utc)
+    
+    start_time = int((now - delta).timestamp() * 1000)
+    
+    url = "https://api.binance.com/api/v3/klines"
+    all_points = []
+    
+    # Pagination Loop (Max 5 requests to avoid timeout/limits -> 5000 candles)
+    current_start = start_time
+    for _ in range(5):
+        params = {
+            "symbol": symbol,
+            "interval": binance_interval,
+            "limit": 1000,
+            "startTime": current_start
+        }
         
+        try:
+            with httpx.Client() as client:
+                resp = client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+            
+            if not data:
+                break
+                
+            for k in data:
+                # Binance Kline: [Open Time, Open, High, Low, Close, Vol, Close Time, ...]
+                all_points.append(ChartDataPoint(
+                    time=int(k[0] / 1000), # ms to seconds
+                    open=float(k[1]),
+                    high=float(k[2]),
+                    low=float(k[3]),
+                    close=float(k[4]),
+                    volume=float(k[5])
+                ))
+            
+            # Update start for next page (Close Time + 1ms)
+            last_close_time = data[-1][6]
+            current_start = last_close_time + 1
+            
+            # If we got fewer than limit, we reached the end
+            if len(data) < 1000:
+                break
+                
+        except Exception as e:
+            print(f"Error fetching Binance data for {ticker}: {e}")
+            break
+            
+    return all_points
+
+def map_range_to_yf_interval(range_filter: str) -> tuple[str, str]:
+
+    if range_filter == "5m":
+        return "1d", "5m"
+    elif range_filter == "15m":
+        return "5d", "15m"
+    elif range_filter == "1H":
+         return "1mo", "1h"
+    elif range_filter == "4H":
+         return "3mo", "1h" # Fallback
+    elif range_filter in ["D", "1Y"]:
+        return "1y", "1d"
+    elif range_filter == "ALL":
+        return "max", "1wk"
+    return "1mo", "1d" # Default
+
+def parse_yf_history(hist: pd.DataFrame, interval: str) -> List[ChartDataPoint]:
+    data_points = []
+    for index, row in hist.iterrows():
+        # index is datetime
+        time_str = index.strftime("%Y-%m-%d")
+        # For intraday (1m, 5m, 1h), we need timestamps or full ISO
+        if interval in ["2m", "5m", "15m", "30m", "60m", "90m", "1h"]:
+            # Lightweight charts likes UNIX timestamp number for intraday
+            time_str = int(index.timestamp())
+        
+        data_points.append(ChartDataPoint(
+            time=time_str,
+            open=row['Open'],
+            high=row['High'],
+            low=row['Low'],
+            close=row['Close'],
+            volume=row['Volume']
+        ))
+    return data_points
+
+def validate_interval_for_range(range_filter: str, interval: str) -> str:
+    """Enforce logical bounds for interval based on range."""
+    # 1d -> Intraday only
+    if range_filter == "1d":
+        if interval not in ["5m", "15m", "1h", "30m", "60m", "90m"]:
+            return "5m"
+    # 1mo -> Balance
+    elif range_filter == "1mo":
+         if interval in ["1m", "2m", "5m"]: # Too granular
+             return "1h"
+    # 1y -> Long term
+    elif range_filter == "1y" or range_filter == "ytd":
+         if interval in ["1m", "2m", "5m", "15m", "30m"]:
+             return "1d"
+             
+    return interval
+
+def get_chart_data(ticker: str, range_filter: str, interval_filter: str = None) -> ChartResponse:
+    # Determine Interval
+    period = range_filter
+    interval = interval_filter
+    
+    if not interval:
+        p, i = map_range_to_yf_interval(range_filter)
+        period = p
+        interval = i
+    else:
+        # Validate user/frontend provided interval
+        interval = validate_interval_for_range(period, interval)
+        
+    if period == "ALL": period = "max"
+        
+    # ROUTING FOR CRYPTO
+    if ticker in TICKERS_CRYPTO:
+        # Pass period so fetcher can calculate start time and loop
+        data_points = fetch_crypto_history(ticker, interval, period)
+        if data_points:
+             return ChartResponse(ticker=ticker, region="CRYPTO", interval=interval, data=data_points)
+
     try:
         stock = yf.Ticker(ticker)
-        # Handle .NS if generic
         if ".NS" not in ticker and ticker in [t.replace(".NS", "") for t in TICKERS_IN]:
             stock = yf.Ticker(f"{ticker}.NS")
             
@@ -72,34 +188,13 @@ def get_chart_data(ticker: str, range_filter: str) -> ChartResponse:
         if hist.empty:
             return ChartResponse(ticker=ticker, region="Unknown", interval=interval, data=[])
 
-        data_points = []
-        for index, row in hist.iterrows():
-            # index is datetime
-            time_str = index.strftime("%Y-%m-%d")
-            # For intraday (1m, 5m, 1h), we need timestamps or full ISO
-            if interval in ["1m", "5m", "15m", "1h"]:
-                # Lightweight charts likes UNIX timestamp number for intraday
-               time_str = int(index.timestamp())
+        data_points = parse_yf_history(hist, interval)
             
-            data_points.append(ChartDataPoint(
-                time=time_str,
-                open=row['Open'],
-                high=row['High'],
-                low=row['Low'],
-                close=row['Close'],
-                volume=row['Volume']
-            ))
-            
-        return ChartResponse(
-            ticker=ticker, 
-            region="US", # Placeholder
-            interval=interval, 
-            data=data_points
-        )
+        return ChartResponse(ticker=ticker, region="US", interval=interval, data=data_points)
             
     except Exception as e:
         print(f"Error fetching chart for {ticker}: {e}")
-        return ChartResponse(ticker=ticker, region="Error", interval=interval, data=[])
+        return ChartResponse(ticker=ticker, region="Error", interval=interval or "1d", data=[])
 
 def get_signal_from_technical(ticker: str) -> Signal:
     try:
@@ -109,7 +204,7 @@ def get_signal_from_technical(ticker: str) -> Signal:
         hist = stock.history(period="1mo")
         
         if hist.empty:
-            raise Exception("No data")
+            raise ValueError(f"No historical data found for {ticker}")
 
         current_price = hist['Close'].iloc[-1]
         
@@ -146,7 +241,7 @@ def get_signal_from_technical(ticker: str) -> Signal:
                  drivers.append(SignalDriver(label="Below 20 SMA", value=60, sentiment="Bearish"))
 
         # Add random secondary driver for flavor
-        secondary_driver = random.choice(DRIVERS)
+        secondary_driver = random.choice(DRIVERS) # NOSONAR
         if secondary_driver not in [d.label for d in drivers]:
              drivers.append(SignalDriver(label=secondary_driver, value=random.randint(40, 80), sentiment="Neutral"))
         

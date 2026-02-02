@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useEffect, useState, useMemo } from "react";
 import { fetchChartData, ChartDataPoint } from "@/lib/api";
-import { updateHistory, getUserWatchlists, createWatchlist, addToWatchlist, removeFromWatchlist } from "@/lib/db";
+import { addToWatchlist, createWatchlist, getUserWatchlists, removeFromWatchlist, syncUserProfile, updateHistory, getSystemConfig } from "@/lib/db";
 import { calculateIndicators, calculateHeikinAshi, IndicatorConfig } from "@/lib/indicators";
 import { useAuth } from "@/context/AuthContext";
 import { UserMenu } from "@/components/UserMenu";
@@ -20,7 +20,14 @@ import { NewsPanel } from "@/components/NewsPanel";
 import { IndicatorSettingsDialog } from "@/components/IndicatorSettingsDialog";
 import { useMarketStream } from "@/hooks/useMarketStream";
 
-const TIMEFRAMES = ['1m', '5m', '15m', '1H', 'D', '1Y', 'ALL'];
+const TIMEFRAMES = ['5m', '15m', '1H', 'D', '1Y', 'ALL'];
+
+const RANGE_CONFIG: Record<string, { valid: string[], default: string }> = {
+    '1D': { valid: ['5m', '15m', '1H'], default: '5m' },
+    '1M': { valid: ['15m', '1H', '4H', '1D'], default: '1H' },
+    '1Y': { valid: ['4H', '1D'], default: '1D' },
+    'ALL': { valid: ['1D'], default: '1D' } // Simplified for ALL to just 1D for now as others aren't in UI
+};
 
 const CHART_COLORS = { backgroundColor: "#050505", textColor: "#64748B" };
 
@@ -45,8 +52,8 @@ export default function TerminalPage() {
     const ticker = (params.ticker as string).toUpperCase();
 
     // State
-    const [range, setRange] = useState("1mo");
-    const [activeTf, setActiveTf] = useState("D");
+    const [activeRange, setActiveRange] = useState("1mo");
+    const [activeInterval, setActiveInterval] = useState("1d");
     const [chartData, setChartData] = useState<ChartDataPoint[] | null>(null);
     const [loading, setLoading] = useState(true);
     const [chartMode, setChartMode] = useState<"candle" | "area" | "line" | "heikin">("candle");
@@ -86,26 +93,89 @@ export default function TerminalPage() {
         }
     }, [lastTrade, chartData, ticker]);
 
-    // Map UI TF to API Range
-    const handleTimeframeChange = (tf: string) => {
-        setActiveTf(tf);
+    // Handlers
+    const handleIntervalChange = (val: string) => {
+        // Map UI to API Interval
+        // 5m, 15m, 1H->1h, 4H->1h (agg later), 1D->1d
+        let apiInt = val;
+        if (val === '1H') apiInt = '1h';
+        if (val === '4H') apiInt = '1h'; // Fallback
+        if (val === '1D') apiInt = '1d';
+
+        setActiveInterval(apiInt);
         setLoading(true);
-        let apiRange = tf;
-        if (tf === '4H') apiRange = '4H';
-        setRange(apiRange);
-        // Reset live candle on TF change until new data loads
+        setLiveCandle(undefined);
+    };
+
+    const handleRangeChange = (val: string) => {
+        // Map UI to API Range
+        // 1D->1d, 1M->1mo, 1Y->1y, ALL->max
+        let apiRng = val;
+        if (val === '1M') apiRng = '1mo';
+        if (val === '1Y') apiRng = '1y';
+        if (val === '1D') apiRng = '1d';
+
+        // Enforce Logic
+        const config = RANGE_CONFIG[val] || { valid: [], default: '1d' };
+        // Check if current interval is valid
+        // activeInterval is API format (1h), UI buttons are 1H. 
+        // Need to check against UI format if possible or map back.
+        // Simpler: Map API interval back to UI for check, or just check 'activeInterval' against mapped config defaults?
+        // Let's rely on the config using UI keys (1H) and mapping.
+
+        // Actually, we need to set the API interval
+        // Let's find the UI key for the current activeInterval to check validity
+        // This is getting complex with the mapping.
+        // Let's simplify: Just set to default for the range if we switch ranges? 
+        // No, user annoyance.
+
+        // Let's use a helper to get valid API intervals for this Range
+        // valid UI: ['5m', ...]. Map to API: ['5m', ...]
+        // 1H -> 1h, 4H -> 1h.
+
+        // Quick map for check
+        const uiToApi = (ui: string) => {
+            if (ui === '1H' || ui === '4H') return '1h';
+            if (ui === '1D') return '1d';
+            return ui;
+        };
+
+        const validApiIntervals = config.valid.map(uiToApi);
+
+        let newInterval = activeInterval;
+        if (!validApiIntervals.includes(activeInterval) && activeInterval !== '1wk' && activeInterval !== '1mo') {
+            // Current is invalid, switch to default
+            newInterval = uiToApi(config.default);
+        }
+
+        setActiveRange(apiRng);
+        if (newInterval !== activeInterval) {
+            setActiveInterval(newInterval);
+        }
+        setLoading(true);
         setLiveCandle(undefined);
     };
 
     useEffect(() => {
+        const controller = new AbortController();
         const loadData = async () => {
-            const data = await fetchChartData(ticker, activeTf);
-            setChartData(data);
-            setLoading(false);
-            setLiveCandle(undefined);
+            try {
+                const data = await fetchChartData(ticker, activeRange, activeInterval, controller.signal);
+                if (!controller.signal.aborted) {
+                    setChartData(data);
+                    setLoading(false);
+                    setLiveCandle(undefined);
+                }
+            } catch (err: any) {
+                if (err.name !== 'AbortError') {
+                    console.error("Failed to load chart data", err);
+                    if (!controller.signal.aborted) setLoading(false);
+                }
+            }
         };
         loadData();
-    }, [ticker, activeTf]);
+        return () => { controller.abort(); };
+    }, [ticker, activeRange, activeInterval]);
 
     // History & Favorites
     const { user } = useAuth();
@@ -113,8 +183,12 @@ export default function TerminalPage() {
     const [favListId, setFavListId] = useState<string | null>(null);
 
     useEffect(() => {
-        if (!user || loading) return;
-        updateHistory(user.uid, ticker).catch(console.error);
+        if (!user) return; // Only proceed if user is logged in
+
+        // Update history for the current ticker
+        if (params.ticker) {
+            updateHistory(user.uid, ticker).catch(console.error);
+        }
 
         const checkFavorite = async () => {
             try {
@@ -133,7 +207,25 @@ export default function TerminalPage() {
             }
         };
         checkFavorite();
-    }, [user, ticker, loading]);
+
+        const loadUserConfig = async () => {
+            if (params.ticker) {
+                // ... (existing history logic if any)
+            }
+            // Load system config
+            try {
+                const sysConfig = await getSystemConfig();
+                setShowAIInsights(sysConfig.features.showAIInsights);
+                if (sysConfig.features.showAIInsights) {
+                    setRightTab("ai");
+                }
+            } catch (error) {
+                console.error("Failed to load config", error);
+            }
+        };
+
+        loadUserConfig();
+    }, [user, params.ticker]);
 
     const toggleFavorite = async () => {
         if (!user || !favListId) return;
@@ -205,7 +297,8 @@ export default function TerminalPage() {
 
     // --- Workspace State ---
     const [activeTool, setActiveTool] = useState("cursor");
-    const [rightTab, setRightTab] = useState<"ai" | "watchlist" | "news">("ai");
+    const [rightTab, setRightTab] = useState<"ai" | "watchlist" | "news">("watchlist"); // Default to watchlist initially
+    const [showAIInsights, setShowAIInsights] = useState(true);
 
     const renderAIContent = () => (
         <div className="flex flex-col gap-4 p-4 h-full overflow-y-auto">
@@ -329,18 +422,46 @@ export default function TerminalPage() {
                         </div>
                         <div className="h-6 w-px bg-white/10 mx-1" />
 
-                        {/* Timeframes */}
-                        <div className="flex items-center gap-1">
-                            {TIMEFRAMES.slice(0, 5).map(tf => (
+                        {/* Intervals */}
+                        <div className="flex items-center gap-0.5">
+                            <span className="text-[10px] text-muted-foreground mr-1 uppercase">Int</span>
+                            {['5m', '15m', '1H', '4H', '1D'].map(int => (
                                 <button
-                                    key={tf}
-                                    onClick={() => handleTimeframeChange(tf)}
+                                    key={int}
+                                    onClick={() => handleIntervalChange(int)}
                                     className={cn(
-                                        "px-2 py-1 text-[11px] font-medium rounded hover:bg-white/5 transition-colors",
-                                        activeTf === tf ? "text-primary" : "text-muted-foreground"
+                                        "px-1.5 py-0.5 text-[10px] font-medium rounded hover:bg-white/5 transition-colors relative",
+                                        activeInterval === int ? "text-primary bg-primary/10" : "text-muted-foreground",
+                                        // Highlight default if it's not the active one (or even if it is, to show it's default)
+                                        RANGE_CONFIG[activeRange === '1mo' ? '1M' : activeRange === '1y' ? '1Y' : activeRange === '1d' ? '1D' : activeRange === 'max' ? 'ALL' : '1D']?.default === int && "ring-1 ring-primary/30"
+                                    )}
+                                    disabled={!RANGE_CONFIG[activeRange === '1mo' ? '1M' : activeRange === '1y' ? '1Y' : activeRange === '1d' ? '1D' : activeRange === 'max' ? 'ALL' : '1D']?.valid.includes(int)}
+                                >
+                                    {int}
+                                </button>
+                            ))}
+                        </div>
+
+                        <div className="h-4 w-px bg-white/10 mx-2" />
+
+                        {/* Ranges */}
+                        <div className="flex items-center gap-0.5">
+                            <span className="text-[10px] text-muted-foreground mr-1 uppercase">Rng</span>
+                            {['1D', '1M', '1Y', 'ALL'].map(rng => (
+                                <button
+                                    key={rng}
+                                    onClick={() => handleRangeChange(rng)}
+                                    className={cn(
+                                        "px-1.5 py-0.5 text-[10px] font-medium rounded hover:bg-white/5 transition-colors relative",
+                                        (activeRange === '1d' && rng === '1D') ||
+                                            (activeRange === '1mo' && rng === '1M') ||
+                                            (activeRange === '1y' && rng === '1Y') ||
+                                            (activeRange === 'max' && rng === 'ALL')
+                                            ? "text-primary bg-primary/10 ring-1 ring-primary/30"
+                                            : "text-muted-foreground"
                                     )}
                                 >
-                                    {tf}
+                                    {rng}
                                 </button>
                             ))}
                         </div>
@@ -397,16 +518,18 @@ export default function TerminalPage() {
                     <div className="w-[320px] border-l border-white/5 bg-[#0B0E11] flex flex-col z-20">
                         {/* Tabs */}
                         <div className="flex border-b border-white/5">
-                            <button
-                                onClick={() => setRightTab("ai")}
-                                className={cn(
-                                    "flex-1 py-3 text-xs font-medium uppercase tracking-wider hover:bg-white/5 transition-colors relative",
-                                    rightTab === "ai" ? "text-primary " : "text-muted-foreground"
-                                )}
-                            >
-                                AI Insight
-                                {rightTab === "ai" && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
-                            </button>
+                            {showAIInsights && (
+                                <button
+                                    onClick={() => setRightTab("ai")}
+                                    className={cn(
+                                        "flex-1 py-3 text-xs font-medium uppercase tracking-wider hover:bg-white/5 transition-colors relative",
+                                        rightTab === "ai" ? "text-primary " : "text-muted-foreground"
+                                    )}
+                                >
+                                    AI Insight
+                                    {rightTab === "ai" && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
+                                </button>
+                            )}
                             <button
                                 onClick={() => setRightTab("watchlist")}
                                 className={cn(

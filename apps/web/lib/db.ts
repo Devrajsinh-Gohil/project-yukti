@@ -8,6 +8,7 @@ export interface UserProfile {
     displayName: string | null;
     photoURL: string | null;
     createdAt: string;
+    role?: 'user' | 'admin';
 }
 
 export interface Watchlist {
@@ -103,4 +104,43 @@ export async function updateHistory(userId: string, ticker: string) {
     await updateDoc(userRef, {
         history: arrayUnion(ticker)
     });
+
+}
+
+/**
+ * ADMIN: Get all users
+ */
+export async function getAllUsers(): Promise<UserProfile[]> {
+    const usersRef = collection(db, "users");
+    const snapshot = await getDocs(usersRef);
+    return snapshot.docs.map(doc => doc.data() as UserProfile);
+}
+
+/**
+ * ADMIN: Update user role
+ */
+export async function updateUserRole(userId: string, role: 'user' | 'admin') {
+    const userRef = doc(db, "users", userId);
+    await updateDoc(userRef, { role });
+    await updateDoc(userRef, { role });
+}
+
+export interface SystemConfig {
+    features: {
+        showAIInsights: boolean;
+    }
+}
+
+export async function getSystemConfig(): Promise<SystemConfig> {
+    const ref = doc(db, "config", "global");
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+        return snap.data() as SystemConfig;
+    }
+    return { features: { showAIInsights: true } }; // Default
+}
+
+export async function updateSystemConfig(config: Partial<SystemConfig>) {
+    const ref = doc(db, "config", "global");
+    await setDoc(ref, config, { merge: true });
 }
