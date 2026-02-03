@@ -1,5 +1,5 @@
 /* eslint-disable no-new-func */
-importScripts("/technicalindicators.js");
+importScripts("/regenerator-runtime.js", "/technicalindicators.js");
 
 self.onmessage = function (e) {
     const { scriptCode, contextData } = e.data;
@@ -79,7 +79,8 @@ self.onmessage = function (e) {
     // Helper to interact with global library
     function handleIndicator(name, input) {
         // @ts-ignore
-        const lib = self.technicalindicators;
+        // Library attaches to self.window or self
+        const lib = self.window || self.technicalindicators || self;
         if (!lib || !lib[name]) {
             throw new Error(`Indicator library not ready or ${name} not found`);
         }

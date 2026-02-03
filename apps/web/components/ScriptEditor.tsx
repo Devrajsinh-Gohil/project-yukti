@@ -1,28 +1,41 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Play, Save, AlertCircle, TerminalSquare } from "lucide-react";
+import { Play, Save, AlertCircle, TerminalSquare, TrendingUp } from "lucide-react";
 import { Script } from "@/lib/scripting-engine";
+import { BacktestResult } from "@/lib/backtest-engine";
+import { BacktestPanel } from "./BacktestPanel";
 
 interface ScriptEditorProps {
     script: Script;
     onSave: (script: Script) => void;
     onRun: (code: string) => void;
+    onBacktest: (code: string) => void;
     logs: string[];
     error?: string;
     isRunning?: boolean;
+    backtestResult?: BacktestResult | null;
 }
 
-export function ScriptEditor({ script, onSave, onRun, logs, error, isRunning }: ScriptEditorProps) {
+export function ScriptEditor({ script, onSave, onRun, onBacktest, logs, error, isRunning, backtestResult }: ScriptEditorProps) {
     const [name, setName] = useState(script.name);
     const [code, setCode] = useState(script.code);
     const [isDirty, setIsDirty] = useState(false);
+    const [showBacktest, setShowBacktest] = useState(false);
 
     useEffect(() => {
         setName(script.name);
         setCode(script.code);
         setIsDirty(false);
+        setShowBacktest(false);
     }, [script.id]); // Reset when checking a different script
+
+    // Auto-show backtest when result arrives
+    useEffect(() => {
+        if (backtestResult) {
+            setShowBacktest(true);
+        }
+    }, [backtestResult]);
 
     const handleSave = () => {
         onSave({ ...script, name, code });
@@ -32,6 +45,14 @@ export function ScriptEditor({ script, onSave, onRun, logs, error, isRunning }: 
     const handleRun = () => {
         onRun(code);
     };
+
+    const handleBacktest = () => {
+        onBacktest(code);
+    };
+
+    if (showBacktest && backtestResult) {
+        return <BacktestPanel result={backtestResult} onClose={() => setShowBacktest(false)} />;
+    }
 
     return (
         <div className="flex flex-col h-full bg-[#0B0E11] border-l border-white/10 text-slate-300">
@@ -48,6 +69,13 @@ export function ScriptEditor({ script, onSave, onRun, logs, error, isRunning }: 
                     />
                 </div>
                 <div className="flex items-center gap-2">
+                    <button
+                        onClick={handleBacktest}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded transition-colors"
+                        title="Run Backtest"
+                    >
+                        <TrendingUp size={14} /> Backtest
+                    </button>
                     <button
                         onClick={handleRun}
                         className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-green-600/20 text-green-400 hover:bg-green-600/30 rounded transition-colors"

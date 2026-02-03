@@ -3,6 +3,7 @@ import {
     ADX, AwesomeOscillator
 } from "technicalindicators";
 import { ChartDataPoint } from "./api";
+export { type ChartDataPoint };
 
 // --- Types ---
 

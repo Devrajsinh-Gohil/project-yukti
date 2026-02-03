@@ -20,6 +20,7 @@ import { NewsPanel } from "@/components/NewsPanel";
 import { IndicatorSettingsDialog } from "@/components/IndicatorSettingsDialog";
 import { useMarketStream } from "@/hooks/useMarketStream";
 import { Script, ScriptEngine, ScriptResult } from "@/lib/scripting-engine";
+import { BacktestEngine, BacktestResult } from "@/lib/backtest-engine";
 import { ScriptEditor } from "@/components/ScriptEditor";
 import { ScriptManager } from "@/components/ScriptManager";
 import { TechnicalsPanel } from "@/components/TechnicalsPanel";
@@ -324,6 +325,7 @@ export default function TerminalPage() {
     const [activeScriptId, setActiveScriptId] = useState<string | null>(null);
     const [isScriptPanelOpen, setIsScriptPanelOpen] = useState(false);
     const [scriptResults, setScriptResults] = useState<ScriptResult[]>([]);
+    const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
 
     // Editor State
     const [executionLogs, setExecutionLogs] = useState<string[]>([]);
@@ -404,6 +406,31 @@ for (let i = period; i < close.length; i++) {
                 return s;
             }));
         }
+    };
+
+    const handleRunBacktest = async (code: string) => {
+        if (!chartData) return;
+        setExecutionLogRunning(true);
+        setBacktestResult(null); // Reset previous result
+
+        // 1. Execute Script to get Signals
+        const scriptRes = await ScriptEngine.execute(code, chartData);
+        setExecutionLogs(scriptRes.logs);
+        setExecutionError(scriptRes.error);
+
+        if (!scriptRes.error) {
+            // 2. Run Backtest Engine
+            try {
+                const btResult = BacktestEngine.run(scriptRes.signals, chartData);
+                setBacktestResult(btResult);
+                setExecutionLogs(prev => [...prev, "Backtest completed successfully."]);
+            } catch (e: any) {
+                setExecutionError("Backtest Error: " + e.message);
+                setExecutionLogs(prev => [...prev, "Backtest Error: " + e.message]);
+            }
+        }
+
+        setExecutionLogRunning(false);
     };
 
     const handleSaveScript = (updated: Script) => {
@@ -769,9 +796,11 @@ for (let i = period; i < close.length; i++) {
                                     script={activeScript}
                                     onSave={handleSaveScript}
                                     onRun={handleRunScript}
+                                    onBacktest={handleRunBacktest}
                                     logs={executionLogs}
                                     error={executionError}
                                     isRunning={executionLogRunning}
+                                    backtestResult={backtestResult}
                                 />
                             ) : (
                                 <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">

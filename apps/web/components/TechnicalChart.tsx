@@ -276,6 +276,46 @@ export function TechnicalChart({
 
     }, [indicators]);
 
+    // Handle Script Results (Markers & Plots)
+    useEffect(() => {
+        if (!mainSeriesRef.current || !scriptResults) return;
+
+        try {
+            // 1. Process Markers (Buy/Sell Signals)
+            const markers: LightweightCharts.SeriesMarker<any>[] = [];
+            scriptResults.forEach(res => {
+                res.signals.forEach(sig => {
+                    markers.push({
+                        time: sig.time as any,
+                        position: sig.type === 'BUY' ? 'belowBar' : 'aboveBar',
+                        color: sig.type === 'BUY' ? '#22c55e' : '#ef4444',
+                        shape: sig.type === 'BUY' ? 'arrowUp' : 'arrowDown',
+                        text: (sig.label && sig.label !== 'Cross') ? sig.label : (sig.type === 'BUY' ? 'BUY' : 'SELL'),
+                        size: 2 as any, // Typed as SeriesMarker
+                    });
+                });
+            });
+
+            // Sort markers by time
+            markers.sort((a, b) => (a.time as number) - (b.time as number));
+
+            // Use createSeriesMarkers for v5
+            if (mainSeriesRef.current) {
+                try {
+                    // console.log("[TechnicalChart] Creating series markers plugin:", markers.length);
+                    LightweightCharts.createSeriesMarkers(mainSeriesRef.current, markers);
+                } catch (e) {
+                    console.error("[TechnicalChart] Failed to create set markers:", e);
+                }
+            }
+
+            // TODO: Handle plots (custom lines) from scripts if needed in future
+
+        } catch (e) {
+            console.error("Error setting markers:", e);
+        }
+    }, [scriptResults]);
+
     // 4. Sync Time Scales
     useEffect(() => {
         if (!isChartReady || !mainChartRef.current) return;
