@@ -37,7 +37,7 @@ const tiers = [
         description: "Tailored solutions for institutions.",
         features: [
             "Direct market access (DMA)",
-            "dedicated infrastructure",
+            "Dedicated infrastructure",
             "Custom model training",
             "API access",
             "24/7 Dedicated account manager",

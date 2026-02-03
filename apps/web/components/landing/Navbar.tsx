@@ -1,14 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
-import { motion } from "framer-motion";
-import { cn } from "@/lib/utils"; // Assuming utils exists, if not I'll just use clsx/tailwind-merge directly or verify path later
-import { Button } from "@/components/ui/button"; // Assuming shadcn/ui exists or generic button, will verify. 
-// If specific UI components don't exist, I'll build them inline for now or check. 
-// Existing code used @/components/Dashboard so likely no strict "ui" folder structure yet?
-// I will stick to standard HTML/Tailwind for safety unless I check.
+import { motion, AnimatePresence } from "framer-motion";
+import { Menu, X } from "lucide-react";
 
 export function Navbar() {
+    const [isOpen, setIsOpen] = useState(false);
+
     return (
         <motion.nav
             initial={{ y: -100, opacity: 0 }}
@@ -29,16 +28,60 @@ export function Navbar() {
                 <Link href="#about" className="hover:text-white transition-colors">About</Link>
             </div>
 
-            <div className="flex items-center gap-4">
+
+            <div className="hidden md:flex items-center gap-4">
                 <Link href="/login" className="text-sm font-medium text-gray-300 hover:text-white transition-colors">
                     Log in
                 </Link>
-                <Link href="/dashboard">
-                    <button className="px-4 py-2 text-sm font-semibold text-black bg-white rounded-full hover:bg-gray-200 transition-colors">
-                        Get Started
-                    </button>
+                <Link
+                    href="/dashboard"
+                    className="px-4 py-2 text-sm font-semibold text-black bg-white rounded-full hover:bg-gray-200 transition-colors"
+                >
+                    Get Started
                 </Link>
             </div>
+
+            {/* Mobile Actions */}
+            <div className="flex md:hidden items-center gap-4">
+                <Link href="/login" className="text-sm font-medium text-gray-300 hover:text-white transition-colors">
+                    Log in
+                </Link>
+                <button
+                    onClick={() => setIsOpen(!isOpen)}
+                    className="text-white p-1"
+                    aria-label="Toggle menu"
+                    aria-expanded={isOpen}
+                    aria-controls="mobile-menu"
+                >
+                    {isOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+                </button>
+            </div>
+
+            {/* Mobile Menu Overlay */}
+            <AnimatePresence>
+                {isOpen && (
+                    <motion.div
+                        id="mobile-menu"
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: "auto" }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="md:hidden absolute top-full left-0 right-0 bg-black/95 border-b border-white/10 backdrop-blur-xl overflow-hidden"
+                    >
+                        <div className="flex flex-col items-center gap-6 py-8">
+                            <Link href="#features" className="text-lg font-medium text-gray-300 hover:text-white" onClick={() => setIsOpen(false)}>Features</Link>
+                            <Link href="#pricing" className="text-lg font-medium text-gray-300 hover:text-white" onClick={() => setIsOpen(false)}>Pricing</Link>
+                            <Link href="#about" className="text-lg font-medium text-gray-300 hover:text-white" onClick={() => setIsOpen(false)}>About</Link>
+                            <Link
+                                href="/dashboard"
+                                onClick={() => setIsOpen(false)}
+                                className="px-6 py-2 text-base font-semibold text-black bg-white rounded-full hover:bg-gray-200 transition-colors"
+                            >
+                                Get Started
+                            </Link>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
         </motion.nav>
     );
 }

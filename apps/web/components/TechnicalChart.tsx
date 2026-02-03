@@ -620,7 +620,21 @@ export function TechnicalChart({
     const getMagnetPrice = (time: LightweightCharts.Time, originalPrice: number): number => {
         if (!data) return originalPrice;
 
-        const candle = data.find((d: any) => d.time === time);
+        const toTimestamp = (t: any): number => {
+            if (typeof t === 'number') return t;
+            if (typeof t === 'string') return new Date(t).getTime() / 1000;
+            if (typeof t === 'object' && 'year' in t) { // BusinessDay
+                return new Date(t.year, t.month - 1, t.day).getTime() / 1000;
+            }
+            return 0;
+        };
+
+        const targetTs = toTimestamp(time);
+
+        const candle = data.find((d: any) => {
+            const dTs = toTimestamp(d.time);
+            return Math.abs(dTs - targetTs) < 1; // Match within 1 second
+        });
         if (!candle) return originalPrice;
 
         const points = [candle.open, candle.high, candle.low, candle.close].filter(v => typeof v === 'number');

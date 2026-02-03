@@ -30,7 +30,6 @@ export function ScriptEditor({ script, onSave, onRun, logs, error, isRunning }: 
     };
 
     const handleRun = () => {
-        console.log("Run script clicked", code);
         onRun(code);
     };
 

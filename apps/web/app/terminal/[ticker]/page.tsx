@@ -94,6 +94,11 @@ export default function TerminalPage() {
             const isNewCandle = (tradeTimeSec - (lastCandleTime as number)) >= intervalSec;
 
             if (isNewCandle) {
+                // Finalize PREVIOUS candle first
+                if (liveCandle) {
+                    setChartData(prev => prev ? [...prev, liveCandle] : [liveCandle]);
+                }
+
                 // Create NEW candle
                 const newCandle: ChartDataPoint = {
                     time: (lastCandleTime as number) + intervalSec,
@@ -104,9 +109,6 @@ export default function TerminalPage() {
                     volume: lastTrade.size
                 };
                 setLiveCandle(newCandle);
-                if (liveCandle) {
-                    setChartData(prev => prev ? [...prev, liveCandle] : [liveCandle]);
-                }
             } else {
                 // Update CURRENT candle
                 const baseLow = liveCandle ? liveCandle.low : lastCandle.low;
@@ -367,7 +369,7 @@ for (let i = period; i < close.length; i++) {
                 }
             ]);
         }
-    }, []);
+    }, [scripts]);
 
     // Execute scripts when data or scripts change
     useEffect(() => {
@@ -484,7 +486,7 @@ for (let i = period; i < close.length; i++) {
                             <span className="text-muted-foreground">{item.value}%</span>
                         </div>
                         <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-                            <div className={cn("h-full rounded-full", item.color)} style={{ width: `${item.value} % ` }} />
+                            <div className={cn("h-full rounded-full", item.color)} style={{ width: `${item.value}%` }} />
                         </div>
                     </div>
                 ))}
@@ -621,7 +623,6 @@ for (let i = period; i < close.length; i++) {
                             className="flex items-center gap-1.5 px-2 py-1 text-xs hover:bg-white/5 rounded text-muted-foreground hover:text-primary transition-colors"
                         >
                             <Layers className="w-4 h-4" />
-                            <span className="hidden sm:inline">Indicators</span>
                             <span className="hidden sm:inline">Indicators</span>
                         </button>
 

@@ -20,9 +20,9 @@ export function Footer() {
                             Trade smarter, faster, and with more confidence.
                         </p>
                         <div className="flex gap-4 text-gray-400">
-                            <Link href="#" className="hover:text-white transition-colors"><Twitter className="w-5 h-5" /></Link>
-                            <Link href="#" className="hover:text-white transition-colors"><Github className="w-5 h-5" /></Link>
-                            <Link href="#" className="hover:text-white transition-colors"><Linkedin className="w-5 h-5" /></Link>
+                            <Link href="#" className="hover:text-white transition-colors" aria-label="Follow us on Twitter"><Twitter className="w-5 h-5" /></Link>
+                            <Link href="#" className="hover:text-white transition-colors" aria-label="Follow us on GitHub"><Github className="w-5 h-5" /></Link>
+                            <Link href="#" className="hover:text-white transition-colors" aria-label="Follow us on LinkedIn"><Linkedin className="w-5 h-5" /></Link>
                         </div>
                     </div>
 

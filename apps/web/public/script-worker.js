@@ -1,5 +1,5 @@
 /* eslint-disable no-new-func */
-importScripts("https://unpkg.com/technicalindicators@3.1.0/dist/browser.js");
+importScripts("/technicalindicators.js");
 
 self.onmessage = function (e) {
     const { scriptCode, contextData } = e.data;

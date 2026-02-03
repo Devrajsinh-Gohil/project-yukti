@@ -2,7 +2,7 @@
 import { ScriptEngine } from "./lib/scripting-engine";
 import { ChartDataPoint } from "./lib/api";
 
-// Mock Data: 40 points. 
+// Mock Data: 50 points. 
 // Price moves UP, then DOWN (crossing SMA).
 const generateData = (): ChartDataPoint[] => {
     const data: ChartDataPoint[] = [];
