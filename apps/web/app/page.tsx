@@ -1,17 +1,21 @@
-import { Dashboard } from "@/components/Dashboard";
-import ProtectedRoute from "@/components/ProtectedRoute";
+"use client";
 
-export default function Home() {
+import { Navbar } from "@/components/landing/Navbar";
+import { Hero } from "@/components/landing/Hero";
+import { Features } from "@/components/landing/Features";
+import { Pricing } from "@/components/landing/Pricing";
+import { About } from "@/components/landing/About";
+import { Footer } from "@/components/landing/Footer";
+
+export default function LandingPage() {
   return (
-    <ProtectedRoute>
-      <main>
-        <div className="fixed inset-0 bg-[#0B0E11] -z-20" />
-        {/* Ambient Gradients */}
-        <div className="fixed top-0 left-0 w-[500px] h-[500px] bg-primary/20 rounded-full blur-[128px] -z-10 -translate-x-1/2 -translate-y-1/2 pointer-events-none" />
-        <div className="fixed bottom-0 right-0 w-[500px] h-[500px] bg-secondary/20 rounded-full blur-[128px] -z-10 translate-x-1/2 translate-y-1/2 pointer-events-none" />
-
-        <Dashboard />
-      </main>
-    </ProtectedRoute>
+    <main className="min-h-screen bg-black text-white selection:bg-indigo-500/30 selection:text-indigo-200">
+      <Navbar />
+      <Hero />
+      <Features />
+      <Pricing />
+      <About />
+      <Footer />
+    </main>
   );
 }

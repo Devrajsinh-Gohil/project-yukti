@@ -3,7 +3,7 @@
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useParams, useRouter } from "next/navigation";
 import { TechnicalChart } from "@/components/TechnicalChart";
-import { ArrowLeft, BrainCircuit, Activity, Layers, Loader2, BarChart2, TrendingUp as TrendingUpIcon, AreaChart as AreaChartIcon, Heart } from "lucide-react";
+import { ArrowLeft, BrainCircuit, Activity, Layers, Loader2, BarChart2, TrendingUp as TrendingUpIcon, AreaChart as AreaChartIcon, Heart, Code, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useEffect, useState, useMemo } from "react";
@@ -19,6 +19,9 @@ import { WatchlistPanel } from "@/components/WatchlistPanel";
 import { NewsPanel } from "@/components/NewsPanel";
 import { IndicatorSettingsDialog } from "@/components/IndicatorSettingsDialog";
 import { useMarketStream } from "@/hooks/useMarketStream";
+import { Script, ScriptEngine, ScriptResult } from "@/lib/scripting-engine";
+import { ScriptEditor } from "@/components/ScriptEditor";
+import { ScriptManager } from "@/components/ScriptManager";
 
 const TIMEFRAMES = ['5m', '15m', '1H', 'D', '1Y', 'ALL'];
 
@@ -71,27 +74,58 @@ export default function TerminalPage() {
         const streamSymbol = lastTrade.symbol.toUpperCase();
 
         if (streamSymbol.startsWith(pageSymbol)) {
-            // Get last candle
             const lastCandle = chartData[chartData.length - 1];
+            const tradeTime = lastTrade.time || Date.now();
 
-            // Check if last candle is "today" or relevant interval. 
-            // For simplicity in this demo, we update the last candle in place.
-            // In a real app, we'd check timestamps to see if we need a NEW candle.
-
-            const newPrice = lastTrade.price;
-
-            // Create updated candle
-            const updated: ChartDataPoint = {
-                ...lastCandle,
-                close: newPrice,
-                high: Math.max(lastCandle.high, newPrice),
-                low: Math.min(lastCandle.low, newPrice),
-                // volume: lastCandle.volume + lastTrade.size // Optional accumulation
+            // Interval Parsing
+            const getIntervalSeconds = (int: string) => {
+                if (int.endsWith('m')) return parseInt(int) * 60;
+                if (int.endsWith('h')) return parseInt(int) * 3600;
+                if (int.endsWith('d')) return parseInt(int) * 86400;
+                return 60; // Default 1m
             };
 
-            setLiveCandle(updated);
+            const intervalSec = getIntervalSeconds(activeInterval);
+            const lastCandleTime = typeof lastCandle.time === 'string'
+                ? new Date(lastCandle.time).getTime() / 1000
+                : lastCandle.time;
+
+            const tradeTimeSec = Math.floor(tradeTime / 1000);
+            const isNewCandle = (tradeTimeSec - (lastCandleTime as number)) >= intervalSec;
+
+            if (isNewCandle) {
+                // Create NEW candle
+                const newCandle: ChartDataPoint = {
+                    time: (lastCandleTime as number) + intervalSec,
+                    open: lastTrade.price,
+                    high: lastTrade.price,
+                    low: lastTrade.price,
+                    close: lastTrade.price,
+                    volume: lastTrade.size
+                };
+                setLiveCandle(newCandle);
+                if (liveCandle) {
+                    setChartData(prev => prev ? [...prev, liveCandle] : [liveCandle]);
+                }
+            } else {
+                // Update CURRENT candle
+                const baseLow = liveCandle ? liveCandle.low : lastCandle.low;
+                const baseHigh = liveCandle ? liveCandle.high : lastCandle.high;
+                const baseOpen = liveCandle ? liveCandle.open : lastCandle.open;
+                const currentVol = liveCandle ? (liveCandle.volume || 0) : (lastCandle.volume || 0);
+
+                const updated: ChartDataPoint = {
+                    time: lastCandle.time,
+                    open: baseOpen,
+                    close: lastTrade.price,
+                    high: Math.max(baseHigh, lastTrade.price),
+                    low: Math.min(baseLow, lastTrade.price),
+                    volume: currentVol + lastTrade.size
+                };
+                setLiveCandle(updated);
+            }
         }
-    }, [lastTrade, chartData, ticker]);
+    }, [lastTrade, chartData, ticker, activeInterval]);
 
     // Handlers
     const handleIntervalChange = (val: string) => {
@@ -285,6 +319,120 @@ export default function TerminalPage() {
         return calculateIndicators(chartData, activeIndicators);
     }, [chartData, activeIndicators]);
 
+    // --- Scripting Engine State ---
+    const [scripts, setScripts] = useState<Script[]>([]);
+    const [activeScriptId, setActiveScriptId] = useState<string | null>(null);
+    const [isScriptPanelOpen, setIsScriptPanelOpen] = useState(false);
+    const [scriptResults, setScriptResults] = useState<ScriptResult[]>([]);
+
+    // Editor State
+    const [executionLogs, setExecutionLogs] = useState<string[]>([]);
+    const [executionError, setExecutionError] = useState<string | undefined>(undefined);
+    const [executionLogRunning, setExecutionLogRunning] = useState(false);
+
+    // Initial Scripts Load (Mock)
+    useEffect(() => {
+        // TODO: Load from DB
+        if (scripts.length === 0) {
+            setScripts([
+                {
+                    id: '1',
+                    name: 'My First Script',
+                    enabled: false,
+                    code: `// Simple SMA Strategy
+const period = 20;
+const sma = SMA.calculate({period, values: close});
+plot("SMA", sma, {color: "#3b82f6"});
+
+// Loop through history to find crossover signals
+for (let i = period; i < close.length; i++) {
+    const prevPrice = close[i - 1];
+    const prevSMA = sma[i - 1];
+    const currPrice = close[i];
+    const currSMA = sma[i];
+
+    // Crossover Buy
+    if (prevPrice <= prevSMA && currPrice > currSMA) {
+        log("Buy Signal at index " + i);
+        signal(i, "BUY", "BUY");
+    }
+
+    // Crossover Sell
+    if (prevPrice >= prevSMA && currPrice < currSMA) {
+        log("Sell Signal at index " + i);
+        signal(i, "SELL", "SELL");
+    }
+}
+`
+                }
+            ]);
+        }
+    }, []);
+
+    // Execute scripts when data or scripts change
+    useEffect(() => {
+        if (!chartData || chartData.length === 0) return;
+
+        const runScripts = async () => {
+            const promises = scripts.filter(s => s.enabled).map(script =>
+                ScriptEngine.execute(script.code, chartData)
+            );
+
+            const results = await Promise.all(promises);
+            // Filter out any undefined/null if that happens, though execute always returns a result object
+            setScriptResults(results);
+        };
+
+        runScripts();
+    }, [chartData, scripts]); // Re-run when data updates or scripts change
+
+    // Run specific code (from editor)
+    const handleRunScript = async (code: string) => {
+        if (!chartData) return;
+        setExecutionLogRunning(true);
+        const res = await ScriptEngine.execute(code, chartData);
+        setExecutionLogRunning(false);
+        setExecutionLogs(res.logs);
+        setExecutionError(res.error);
+
+        // UX Improvement: Await feedback immediately by enabling script
+        if (activeScriptId) {
+            setScripts(prev => prev.map(s => {
+                if (s.id === activeScriptId) {
+                    return { ...s, code, enabled: true };
+                }
+                return s;
+            }));
+        }
+    };
+
+    const handleSaveScript = (updated: Script) => {
+        setScripts(prev => prev.map(s => s.id === updated.id ? updated : s));
+        // TODO: Persist to DB
+    };
+
+    const handleCreateScript = () => {
+        const newScript: Script = {
+            id: Date.now().toString(),
+            name: "New Script",
+            code: "// Write your strategy here...",
+            enabled: false
+        };
+        setScripts(prev => [...prev, newScript]);
+        setActiveScriptId(newScript.id);
+    };
+
+    const handleDeleteScript = (id: string) => {
+        setScripts(prev => prev.filter(s => s.id !== id));
+        if (activeScriptId === id) setActiveScriptId(null);
+    };
+
+    const handleToggleScript = (id: string) => {
+        setScripts(prev => prev.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s));
+    };
+
+    const activeScript = scripts.find(s => s.id === activeScriptId);
+
     // Derived Data for Chart Rendering
     const chartDataToRender = useMemo(() => {
         if (!chartData) return [];
@@ -336,7 +484,7 @@ export default function TerminalPage() {
                             <span className="text-muted-foreground">{item.value}%</span>
                         </div>
                         <div className="h-1 w-full bg-white/5 rounded-full overflow-hidden">
-                            <div className={cn("h-full rounded-full", item.color)} style={{ width: `${item.value}%` }} />
+                            <div className={cn("h-full rounded-full", item.color)} style={{ width: `${item.value} % ` }} />
                         </div>
                     </div>
                 ))}
@@ -474,6 +622,18 @@ export default function TerminalPage() {
                         >
                             <Layers className="w-4 h-4" />
                             <span className="hidden sm:inline">Indicators</span>
+                            <span className="hidden sm:inline">Indicators</span>
+                        </button>
+
+                        <button
+                            onClick={() => setIsScriptPanelOpen(!isScriptPanelOpen)}
+                            className={cn(
+                                "flex items-center gap-1.5 px-2 py-1 text-xs rounded transition-colors ml-1",
+                                isScriptPanelOpen ? "bg-primary/20 text-primary" : "hover:bg-white/5 text-muted-foreground hover:text-primary"
+                            )}
+                        >
+                            <Terminal className="w-4 h-4" />
+                            <span className="hidden sm:inline">Editor</span>
                         </button>
                     </div>
 
@@ -508,6 +668,7 @@ export default function TerminalPage() {
                                 onDrawingComplete={() => setActiveTool("cursor")}
                                 colors={CHART_COLORS}
                                 liveDataPoint={liveCandle}
+                                scriptResults={scriptResults}
                             />
 
 
@@ -560,7 +721,42 @@ export default function TerminalPage() {
                         </div>
                     </div>
                 </div>
+
+                {/* Script Editor Panel */}
+                {isScriptPanelOpen && (
+                    <div className="h-[300px] border-t border-white/10 flex z-[100] bg-[#0B0E11] shadow-2xl relative">
+                        {/* Drag Handle (Visual only for now) */}
+                        <div className="absolute top-0 left-0 w-full h-1 bg-white/5 hover:bg-white/10 cursor-ns-resize" />
+
+                        <ScriptManager
+                            scripts={scripts}
+                            selectedId={activeScriptId}
+                            onSelect={setActiveScriptId}
+                            onCreate={handleCreateScript}
+                            onDelete={handleDeleteScript}
+                            onToggle={handleToggleScript}
+                        />
+
+                        <div className="flex-1 overflow-hidden">
+                            {activeScript ? (
+                                <ScriptEditor
+                                    script={activeScript}
+                                    onSave={handleSaveScript}
+                                    onRun={handleRunScript}
+                                    logs={executionLogs}
+                                    error={executionError}
+                                    isRunning={executionLogRunning}
+                                />
+                            ) : (
+                                <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
+                                    <Code size={48} className="opacity-20" />
+                                    <div className="text-sm">Select or create a script to start coding</div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                )}
             </div>
-        </ProtectedRoute>
+        </ProtectedRoute >
     );
 }

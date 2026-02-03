@@ -5,12 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Devrajsinh-Gohil/project-yukti/apps/data-ingestion/internal/domain"
 	"github.com/gorilla/websocket"
+	"github.com/shopspring/decimal"
 )
 
 const BaseURL = "wss://stream.binance.com:9443/ws"
@@ -76,10 +76,22 @@ func (c *BinanceClient) listenLoop(ctx context.Context, symbol string) {
 			}
 
 			// Normalize to domain.Trade
+			price, err := decimal.NewFromString(event.Price)
+			if err != nil {
+				log.Printf("Error parsing price '%s' for %s: %v", event.Price, symbol, err)
+				continue
+			}
+
+			size, err := decimal.NewFromString(event.Quantity)
+			if err != nil {
+				log.Printf("Error parsing size '%s' for %s: %v", event.Quantity, symbol, err)
+				continue
+			}
+
 			trade := domain.Trade{
 				Symbol:    event.Symbol,
-				Price:     parseFloat(event.Price),
-				Size:      parseFloat(event.Quantity),
+				Price:     price,
+				Size:      size,
 				Timestamp: time.UnixMilli(event.TradeTime),
 				Exchange:  "Binance",
 			}
@@ -110,9 +122,4 @@ type AggTradeEvent struct {
 	Quantity  string `json:"q"`
 	TradeTime int64  `json:"T"`
 	IsBuyer   bool   `json:"m"`
-}
-
-func parseFloat(s string) float64 {
-	f, _ := strconv.ParseFloat(s, 64)
-	return f
 }

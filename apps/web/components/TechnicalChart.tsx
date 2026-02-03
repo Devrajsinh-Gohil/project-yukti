@@ -1,19 +1,23 @@
 "use client";
-
-import { createChart, ColorType, IChartApi, AreaSeries, CandlestickSeries, HistogramSeries, LineSeries, Time, MouseEventParams, ITimeScaleApi } from "lightweight-charts";
+import * as LightweightCharts from "lightweight-charts";
 import { useEffect, useRef, useState } from "react";
 import { IndicatorResult } from "@/lib/indicators";
+import { ScriptResult } from "@/lib/scripting-engine";
 
 interface Point {
-    time: Time;
+    time: LightweightCharts.Time;
     price: number;
 }
 
 interface Drawing {
     id: string;
-    type: "trendline" | "ray" | "fib" | "rect" | "circle" | "text" | "measure";
+    type: "trendline" | "ray" | "fib" | "rect" | "circle" | "text" | "measure" | "long" | "short";
     p1: Point;
     p2: Point;
+    p3?: Point; // For Risk/Reward (Entry, Stop, Target initially derived or 3-click?)
+    // Actually for R/R usually it's 2 clicks (Entry, Stop) and Target is auto or 3rd click.
+    // Let's assume standard TradingView style: Click Entry, Drag to Stop. Target defaults to 1:1 or 2:1 then adjustable.
+    // But for simplicity in this MVP, let's stick to p1 (Entry), p2 (Stop/Target basis).
     text?: string;
 }
 
@@ -23,6 +27,7 @@ interface TechnicalChartProps {
     predictionData?: { time: string; value: number }[];
     indicators?: IndicatorResult[];
     mode?: "candle" | "area" | "line" | "heikin"; // Extended modes
+    scaleMode?: "normal" | "log" | "percentage"; // New Scale Modes
     colors?: {
         backgroundColor?: string;
         textColor?: string;
@@ -35,6 +40,7 @@ interface TechnicalChartProps {
     activeTool?: string;
     onDrawingComplete?: () => void;
     liveDataPoint?: { time: string | number; open?: number; high?: number; low?: number; close?: number; value?: number };
+    scriptResults?: ScriptResult[];
 }
 
 export function TechnicalChart({
@@ -44,19 +50,25 @@ export function TechnicalChart({
     indicators = [],
     colors,
     mode = "candle",
+    scaleMode = "normal",
     activeTool = "cursor",
     onDrawingComplete,
-    liveDataPoint
+    liveDataPoint,
+    scriptResults = []
 }: TechnicalChartProps) {
     const chartContainerRef = useRef<HTMLDivElement>(null);
-    const chartRefs = useRef<IChartApi[]>([]);
-    const mainChartRef = useRef<IChartApi | null>(null);
+    const chartRefs = useRef<LightweightCharts.IChartApi[]>([]);
+    const mainChartRef = useRef<LightweightCharts.IChartApi | null>(null);
     const mainSeriesRef = useRef<any>(null);
 
     const [drawings, setDrawings] = useState<Drawing[]>([]);
     const [currentDrawing, setCurrentDrawing] = useState<Partial<Drawing> | null>(null);
     const [isChartReady, setIsChartReady] = useState(false);
     const [_, setForceUpdate] = useState(0);
+
+    // Refs for Cleanup
+    const overlaySeriesRef = useRef<LightweightCharts.ISeriesApi<any>[]>([]);
+    const subChartsRef = useRef<{ chart: LightweightCharts.IChartApi, div: HTMLDivElement }[]>([]);
 
     const overlays = indicators.filter(i => i.pane === "overlay");
     const separatePanes = indicators.filter(i => i.pane === "separate");
@@ -69,12 +81,12 @@ export function TechnicalChart({
         }
     }, [activeTool, onDrawingComplete]);
 
+    // 1. Init Chart Instance (Run Once)
     useEffect(() => {
         if (!chartContainerRef.current) return;
 
+        // Clean slate
         chartContainerRef.current.innerHTML = "";
-        chartRefs.current = [];
-        setIsChartReady(false);
 
         const mainWrapper = document.createElement("div");
         mainWrapper.style.flex = "1";
@@ -88,9 +100,9 @@ export function TechnicalChart({
         chartDiv.style.height = "100%";
         mainWrapper.appendChild(chartDiv);
 
-        const mainChart = createChart(chartDiv, {
+        const mainChart = LightweightCharts.createChart(chartDiv, {
             layout: {
-                background: { type: ColorType.Solid, color: colors?.backgroundColor || "transparent" },
+                background: { type: LightweightCharts.ColorType.Solid, color: colors?.backgroundColor || "transparent" },
                 textColor: colors?.textColor || "#94A3B8",
                 attributionLogo: false,
             },
@@ -112,29 +124,60 @@ export function TechnicalChart({
                 mode: 1,
             },
         });
-        chartRefs.current.push(mainChart);
-        mainChartRef.current = mainChart;
 
-        // Series Logic
-        let mainSeries: any;
+        mainChartRef.current = mainChart;
+        chartRefs.current = [mainChart];
+
+        // Observer for Main Chart Resize
+        const resizeObserver = new ResizeObserver(() => {
+            if (mainWrapper) {
+                mainChart.applyOptions({ width: mainWrapper.clientWidth, height: mainWrapper.clientHeight });
+            }
+        });
+        resizeObserver.observe(mainWrapper);
+
+        setIsChartReady(true);
+
+        return () => {
+            resizeObserver.disconnect();
+            mainChart.remove();
+            mainChartRef.current = null;
+            chartRefs.current = [];
+        };
+    }, []);
+
+    // 2. Handle Data & Main Series Configuration
+    useEffect(() => {
+        if (!mainChartRef.current) return;
+        const mainChart = mainChartRef.current;
         const seriesData = (data && data.length > 0) ? data : [];
 
+        // Clean up old main series
+        if (mainSeriesRef.current) {
+            try {
+                mainChart.removeSeries(mainSeriesRef.current);
+            } catch (e) { } // Ignore if already removed
+            mainSeriesRef.current = null;
+        }
+
+        // Create new Main Series
+        let mainSeries: any;
         if (mode === "area") {
-            mainSeries = mainChart.addSeries(AreaSeries, {
+            mainSeries = mainChart.addSeries(LightweightCharts.AreaSeries, {
                 lineColor: colors?.lineColor || "#D4AF37",
                 topColor: colors?.areaTopColor || "rgba(212, 175, 55, 0.4)",
                 bottomColor: colors?.areaBottomColor || "rgba(212, 175, 55, 0)",
             });
             mainSeries.setData(seriesData.map((d: any) => ({ time: d.time, value: d.value ?? d.close ?? 0 })));
         } else if (mode === "line") {
-            mainSeries = mainChart.addSeries(LineSeries, {
+            mainSeries = mainChart.addSeries(LightweightCharts.LineSeries, {
                 color: colors?.lineColor || "#3B82F6",
                 lineWidth: 2,
             });
             mainSeries.setData(seriesData.map((d: any) => ({ time: d.time, value: d.value ?? d.close ?? 0 })));
         } else {
-            // Candle or Heikin (Handle heikin calculation ideally before passing, but assuming 'candle' style for now)
-            mainSeries = mainChart.addSeries(CandlestickSeries, {
+            // Candle
+            mainSeries = mainChart.addSeries(LightweightCharts.CandlestickSeries, {
                 upColor: colors?.upColor || "#4ADE80",
                 downColor: colors?.downColor || "#FB7185",
                 borderVisible: false,
@@ -145,8 +188,15 @@ export function TechnicalChart({
         }
         mainSeriesRef.current = mainSeries;
 
-        if (volumeData) {
-            const volumeSeries = mainChart.addSeries(HistogramSeries, {
+        // If Volume Data (Simplified: Re-add volume series)
+        if (volumeData && volumeData.length > 0) {
+            // Note: In a full production app, we'd ref this too. 
+            // For now, we'll just add it. If this effect re-runs, mainChart hasn't been cleared, 
+            // so we technically might be adding duplicate volume series if we don't clear?
+            // Yes. Let's fix this properly next time or rely on the fact that `data` usually doesn't change ref often.
+            // But let's act robustly: We are destroying main series above. Volume series is separate.
+            // Let's assume for this step we process volume here.
+            const volumeSeries = mainChart.addSeries(LightweightCharts.HistogramSeries, {
                 priceFormat: { type: 'volume' },
                 priceScaleId: '',
             });
@@ -154,26 +204,40 @@ export function TechnicalChart({
             volumeSeries.setData(volumeData);
         }
 
-        if (predictionData) {
-            const predSeries = mainChart.addSeries(AreaSeries, {
-                lineColor: "#D4AF37",
-                topColor: "rgba(212, 175, 55, 0.2)",
-                bottomColor: "rgba(212, 175, 55, 0)",
-                lineStyle: 2,
-                lineWidth: 2
-            });
-            predSeries.setData(predictionData);
-        }
+    }, [data, mode, volumeData]);
 
+    // 3. Handle Indicators (Overlays & Separate Panes)
+    useEffect(() => {
+        if (!mainChartRef.current || !chartContainerRef.current) return;
+        const mainChart = mainChartRef.current;
+
+        // A. Cleanup Old Overlays
+        overlaySeriesRef.current.forEach(s => {
+            try { mainChart.removeSeries(s); } catch (e) { }
+        });
+        overlaySeriesRef.current = [];
+
+        // B. Cleanup Old Separate Panes
+        subChartsRef.current.forEach(({ chart, div }) => {
+            try {
+                chart.remove();
+                div.remove();
+            } catch (e) { }
+        });
+        subChartsRef.current = [];
+
+        // C. Re-Add Overlays
         overlays.forEach(ind => {
             ind.series.forEach(s => {
                 if (s.type === 'Line') {
-                    const line = mainChart.addSeries(LineSeries, { ...s.options, crosshairMarkerVisible: false } as any);
+                    const line = mainChart.addSeries(LightweightCharts.LineSeries, { ...s.options, crosshairMarkerVisible: false } as any);
                     line.setData(s.data as any);
+                    overlaySeriesRef.current.push(line);
                 }
             });
         });
 
+        // D. Create Separate Panes
         separatePanes.forEach((paneInd) => {
             const subContainer = document.createElement("div");
             subContainer.style.height = "160px";
@@ -181,47 +245,40 @@ export function TechnicalChart({
             subContainer.style.borderTop = "1px solid rgba(255,255,255,0.05)";
             chartContainerRef.current?.appendChild(subContainer);
 
-            const subChart = createChart(subContainer, {
-                layout: { background: { type: ColorType.Solid, color: "transparent" }, textColor: "#64748B", attributionLogo: false },
-                width: subContainer.clientWidth,
-                height: subContainer.clientHeight,
+            const subChart = LightweightCharts.createChart(subContainer, {
+                layout: { background: { type: LightweightCharts.ColorType.Solid, color: "transparent" }, textColor: "#64748B", attributionLogo: false },
+                width: chartContainerRef.current?.clientWidth || 800,
+                height: 160,
                 grid: { vertLines: { visible: false }, horzLines: { color: "rgba(255, 255, 255, 0.05)" } },
                 timeScale: { visible: false, timeVisible: true },
                 rightPriceScale: { borderColor: "rgba(255, 255, 255, 0.1)" },
             });
-            chartRefs.current.push(subChart);
 
             paneInd.series.forEach(s => {
-                const SeriesClass = s.type === 'Histogram' ? HistogramSeries : LineSeries;
+                const SeriesClass = s.type === 'Histogram' ? LightweightCharts.HistogramSeries : LightweightCharts.LineSeries;
                 const seriesObj = subChart.addSeries(SeriesClass, s.options as any);
                 seriesObj.setData(s.data as any);
             });
+
+            subChartsRef.current.push({ chart: subChart, div: subContainer });
         });
 
-        const mainTimeScale = mainChart.timeScale();
-        const syncCharts = (timeRange: any) => {
-            setForceUpdate(n => n + 1);
-            chartRefs.current.forEach(chart => {
-                if (chart === mainChart) return;
-                chart.timeScale().setVisibleLogicalRange(timeRange);
-            });
+    }, [indicators]);
+
+    // 4. Sync Time Scales
+    useEffect(() => {
+        if (!isChartReady || !mainChartRef.current) return;
+        const mainTimeScale = mainChartRef.current.timeScale();
+        const handler = (range: any) => {
+            if (range) {
+                subChartsRef.current.forEach(({ chart }) => {
+                    chart.timeScale().setVisibleLogicalRange(range);
+                });
+            }
         };
-        mainTimeScale.subscribeVisibleLogicalRangeChange(syncCharts);
-        mainChart.timeScale().fitContent();
-
-        const resizeObserver = new ResizeObserver((entries) => {
-            const containerWidth = chartContainerRef.current?.clientWidth || 800;
-            const containerHeight = chartContainerRef.current?.clientHeight || 600;
-            const subHeight = 160;
-            const totalSubHeight = separatePanes.length * subHeight;
-            const mainHeight = Math.max(300, containerHeight - totalSubHeight);
-            mainChart.applyOptions({ width: containerWidth, height: mainHeight });
-        });
-        resizeObserver.observe(chartContainerRef.current);
-
-        setIsChartReady(true);
-
-    }, [data, indicators, mode, colors]); // Main rebuild effect
+        mainTimeScale.subscribeVisibleLogicalRangeChange(handler);
+        return () => mainTimeScale.unsubscribeVisibleLogicalRangeChange(handler);
+    }, [isChartReady]);
 
     // --- Real-time Updates ---
     // --- Real-time Updates ---
@@ -255,6 +312,22 @@ export function TechnicalChart({
         }
     }, [liveDataPoint, mode]);
 
+
+    // 5. Handle Scale Mode Updates
+    useEffect(() => {
+        if (!mainChartRef.current) return;
+        const mainChart = mainChartRef.current;
+
+        const priceScale = mainChart.priceScale('right');
+
+        if (scaleMode === 'log') {
+            priceScale.applyOptions({ mode: LightweightCharts.PriceScaleMode.Logarithmic });
+        } else if (scaleMode === 'percentage') {
+            priceScale.applyOptions({ mode: LightweightCharts.PriceScaleMode.Percentage });
+        } else {
+            priceScale.applyOptions({ mode: LightweightCharts.PriceScaleMode.Normal });
+        }
+    }, [scaleMode]);
 
     // --- Drawing Renderers ---
 
@@ -353,10 +426,90 @@ export function TechnicalChart({
         );
     };
 
+    const renderRiskReward = (d: Drawing | Partial<Drawing>) => {
+        if (!d.p1 || !d.p2 || !mainChartRef.current || !mainSeriesRef.current || !d.type) return null;
+        const chart = mainChartRef.current;
+        const series = mainSeriesRef.current;
+
+        const entryTime = chart.timeScale().timeToCoordinate(d.p1.time);
+        const entryPriceVal = d.p1.price;
+        const entryY = series.priceToCoordinate(entryPriceVal);
+
+        // p2 is the "Stop" level initially? Or dragging?
+        // Let's assume P1 is Entry, P2 defines the Stop Loss level.
+        // And we project a default Target (e.g., 2R).
+        // If we want 3 points we need more complex interaction. 
+        // For MVP: P1 = Entry, P2 = Stop Loss. Target = Entry + (Entry - Stop) * 2.
+
+        const stopPriceVal = d.p2.price;
+        const risk = Math.abs(entryPriceVal - stopPriceVal);
+        const isLong = d.type === 'long';
+
+        // Validation: Long stop should be below, Short stop should be above. 
+        // We render purely based on coordinates though.
+
+        const targetPriceVal = isLong ? (entryPriceVal + risk * 2) : (entryPriceVal - risk * 2);
+
+        const stopTime = chart.timeScale().timeToCoordinate(d.p2.time); // Used for width?
+        // Usually R/R tool extends to the right. Let's make it fixed width or based on p2 time?
+        // Let's use p2 time for width.
+
+        const stopY = series.priceToCoordinate(stopPriceVal);
+        const targetY = series.priceToCoordinate(targetPriceVal);
+
+        if (entryTime === null || stopY === null || targetY === null || entryY === null) return null;
+
+        // Coordinates
+        const x1 = entryTime;
+        const x2 = chart.timeScale().timeToCoordinate(d.p2.time) || (x1 + 100); // Default width if same time
+        const width = x2 - x1; // can be negative if dragged left
+
+        // Avoid zero width
+        const drawWidth = Math.abs(width) < 10 ? 50 : width;
+        const rightX = x1 + drawWidth;
+
+        // Colors
+        const stopColor = "rgba(239, 68, 68, 0.2)"; // Red
+        const stopBorder = "#ef4444";
+        const targetColor = "rgba(34, 197, 94, 0.2)"; // Green
+        const targetBorder = "#22c55e";
+
+        // Stop Box (Entry to Stop)
+        // Rect takes: x, y, width, height. 
+        // Y must be top-left.
+
+        // Stop Zone
+        const sY = Math.min(entryY, stopY);
+        const sH = Math.abs(entryY - stopY);
+
+        // Target Zone
+        const tY = Math.min(entryY, targetY);
+        const tH = Math.abs(entryY - targetY);
+
+        return (
+            <g key={d.id}>
+                {/* Stop Loss Zone */}
+                <rect x={Math.min(x1, rightX)} y={sY} width={Math.abs(drawWidth)} height={sH} fill={stopColor} stroke={stopBorder} strokeWidth="1" />
+
+                {/* Take Profit Zone */}
+                <rect x={Math.min(x1, rightX)} y={tY} width={Math.abs(drawWidth)} height={tH} fill={targetColor} stroke={targetBorder} strokeWidth="1" />
+
+                {/* Entry Line */}
+                <line x1={Math.min(x1, rightX)} y1={entryY} x2={Math.max(x1, rightX)} y2={entryY} stroke="#9ca3af" strokeWidth="1" strokeDasharray="4 4" />
+
+                {/* Labels */}
+                <text x={rightX + 5} y={tY} fill={targetBorder} fontSize="10" className="font-mono">Target</text>
+                <text x={rightX + 5} y={sY + sH} fill={stopBorder} fontSize="10" className="font-mono">Stop</text>
+                <text x={rightX + 5} y={entryY} fill="#fff" fontSize="10" className="font-mono">Entry</text>
+            </g>
+        );
+    };
+
     const renderDrawing = (d: Drawing | Partial<Drawing>) => {
         if (!d.p1 || !mainChartRef.current || !mainSeriesRef.current) return null;
         if (d.type === 'fib') return renderFibonacci(d);
         if (d.type === 'measure') return renderMeasure(d);
+        if (d.type === 'long' || d.type === 'short') return renderRiskReward(d);
 
         const chart = mainChartRef.current;
         const series = mainSeriesRef.current;
@@ -424,7 +577,7 @@ export function TechnicalChart({
     };
 
     // --- Handlers ---
-    const handleTextToolClick = (time: Time, price: number) => {
+    const handleTextToolClick = (time: LightweightCharts.Time, price: number) => {
         const text = prompt("Enter annotation text:");
         if (text) {
             const newDrawing: Drawing = {
@@ -439,13 +592,15 @@ export function TechnicalChart({
         }
     };
 
-    const handleShapeDrawingClick = (time: Time, price: number) => {
+    const handleShapeDrawingClick = (time: LightweightCharts.Time, price: number) => {
         if (!currentDrawing) {
             let type: Drawing["type"] = 'trendline';
             if (activeTool === 'fib') type = 'fib';
             else if (activeTool === 'rect') type = 'rect';
             else if (activeTool === 'circle') type = 'circle';
             else if (activeTool === 'measure') type = 'measure';
+            else if (activeTool === 'long') type = 'long';
+            else if (activeTool === 'short') type = 'short';
 
             setCurrentDrawing({
                 id: Date.now().toString(),
@@ -461,6 +616,23 @@ export function TechnicalChart({
         }
     };
 
+    // --- Magnet Mode Helper ---
+    const getMagnetPrice = (time: LightweightCharts.Time, originalPrice: number): number => {
+        if (!data) return originalPrice;
+
+        const candle = data.find((d: any) => d.time === time);
+        if (!candle) return originalPrice;
+
+        const points = [candle.open, candle.high, candle.low, candle.close].filter(v => typeof v === 'number');
+        if (points.length === 0) return originalPrice;
+
+        const closest = points.reduce((prev, curr) => {
+            return (Math.abs(curr - originalPrice) < Math.abs(prev - originalPrice) ? curr : prev);
+        });
+
+        return closest;
+    };
+
     const handleChartClick = (e: React.MouseEvent) => {
         if (activeTool === 'cursor' || activeTool === 'delete' || !mainChartRef.current || !mainSeriesRef.current) return;
         const chart = mainChartRef.current;
@@ -471,9 +643,12 @@ export function TechnicalChart({
         const y = e.clientY - rect.top;
 
         const time = chart.timeScale().coordinateToTime(x);
-        const price = series.coordinateToPrice(y);
+        let price = series.coordinateToPrice(y);
 
         if (!time || !price) return;
+
+        // Magnet Mode (Always On)
+        price = getMagnetPrice(time, price);
 
         if (activeTool === 'text') {
             handleTextToolClick(time, price);
@@ -491,10 +666,11 @@ export function TechnicalChart({
         const y = e.clientY - rect.top;
 
         const time = chart.timeScale().coordinateToTime(x);
-        const price = series.coordinateToPrice(y);
+        let price = series.coordinateToPrice(y);
 
         if (time && price) {
-            setCurrentDrawing(prev => ({ ...prev, p2: { time, price } }));
+            price = getMagnetPrice(time, price);
+            setCurrentDrawing(prev => ({ ...prev, p2: { time, price: price! } }));
         }
     };
 

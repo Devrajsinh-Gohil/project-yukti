@@ -1,7 +1,7 @@
-import {
-    MousePointer2,
+MousePointer2,
     Minus,
     TrendingUp,
+    TrendingDown,
     Type,
     Crosshair,
     Palette,
@@ -22,6 +22,8 @@ export function DrawingToolbar({ activeTool, onToolSelect }: { activeTool: strin
         { separator: true },
         { id: "trendline", icon: TrendingUp, label: "Trend Line" },
         { id: "fib", icon: PenTool, label: "Fib Retracement" },
+        { id: "long", icon: TrendingUp, label: "Long Position" },
+        { id: "short", icon: TrendingDown, label: "Short Position" },
         { id: "rect", icon: Square, label: "Rectangle" },
         { id: "circle", icon: Circle, label: "Circle" },
         { id: "brush", icon: Palette, label: "Brush" },
