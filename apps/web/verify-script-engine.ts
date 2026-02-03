@@ -24,7 +24,7 @@ const generateData = (): ChartDataPoint[] => {
     return data;
 };
 
-const runTest = () => {
+const runTest = async () => {
     const data = generateData();
     console.log("Generated " + data.length + " data points.");
 
@@ -55,7 +55,7 @@ const runTest = () => {
     `;
 
     console.log("Running Script Engine...");
-    const result = ScriptEngine.execute(scriptCode, data);
+    const result = await ScriptEngine.execute(scriptCode, data);
 
     console.log("Script Logs:", result.logs);
     console.log("Signals Generated:", result.signals);

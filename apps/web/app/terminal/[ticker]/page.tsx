@@ -22,14 +22,31 @@ import { useMarketStream } from "@/hooks/useMarketStream";
 import { Script, ScriptEngine, ScriptResult } from "@/lib/scripting-engine";
 import { ScriptEditor } from "@/components/ScriptEditor";
 import { ScriptManager } from "@/components/ScriptManager";
+import { TechnicalsPanel } from "@/components/TechnicalsPanel";
 
-const TIMEFRAMES = ['5m', '15m', '1H', 'D', '1Y', 'ALL'];
+const AP_INTERVALS = [
+    { label: '1m', value: '1m' },
+    { label: '5m', value: '5m' },
+    { label: '15m', value: '15m' },
+    { label: '30m', value: '30m' },
+    { label: '1h', value: '1h' },
+    // Wait, yfinance supports "60m" or "1h". "4h" isn't standard yfinance. 
+    // Let's stick to standard yfinance intervals: 1m, 5m, 15m, 30m, 1h, 1d, 1wk, 1mo.
+    { label: '1D', value: '1d' },
+    { label: '1W', value: '1wk' },
+    { label: '1M', value: '1mo' },
+];
 
 const RANGE_CONFIG: Record<string, { valid: string[], default: string }> = {
-    '1D': { valid: ['5m', '15m', '1H'], default: '5m' },
-    '1M': { valid: ['15m', '1H', '4H', '1D'], default: '1H' },
-    '1Y': { valid: ['4H', '1D'], default: '1D' },
-    'ALL': { valid: ['1D'], default: '1D' } // Simplified for ALL to just 1D for now as others aren't in UI
+    '1D': { valid: ['1m', '2m', '5m', '15m', '30m', '1h'], default: '5m' }, // 1m is heavy, default 5m
+    '5D': { valid: ['5m', '15m', '30m', '1h'], default: '15m' },
+    '1M': { valid: ['15m', '30m', '1h', '1d'], default: '1h' },
+    '3M': { valid: ['1h', '1d', '1wk'], default: '1d' },
+    '6M': { valid: ['1h', '1d', '1wk'], default: '1d' },
+    'YTD': { valid: ['1d', '1wk', '1mo'], default: '1d' },
+    '1Y': { valid: ['1d', '1wk', '1mo'], default: '1d' },
+    '5Y': { valid: ['1wk', '1mo'], default: '1wk' },
+    'ALL': { valid: ['1mo', '3mo'], default: '1mo' }
 };
 
 const CHART_COLORS = { backgroundColor: "#050505", textColor: "#64748B" };
@@ -55,8 +72,8 @@ export default function TerminalPage() {
     const ticker = (params.ticker as string).toUpperCase();
 
     // State
-    const [activeRange, setActiveRange] = useState("1mo");
-    const [activeInterval, setActiveInterval] = useState("1d");
+    const [activeRange, setActiveRange] = useState("1mo"); // API value directly: 1d, 5d, 1mo...
+    const [activeInterval, setActiveInterval] = useState("1h"); // API value directly: 1m, 5m...
     const [chartData, setChartData] = useState<ChartDataPoint[] | null>(null);
     const [loading, setLoading] = useState(true);
     const [chartMode, setChartMode] = useState<"candle" | "area" | "line" | "heikin">("candle");
@@ -75,13 +92,16 @@ export default function TerminalPage() {
 
         if (streamSymbol.startsWith(pageSymbol)) {
             const lastCandle = chartData[chartData.length - 1];
-            const tradeTime = lastTrade.time || Date.now();
+            // Fix: Use timestamp from trade if available
+            const tradeTime = lastTrade.timestamp ? new Date(lastTrade.timestamp).getTime() : Date.now();
 
             // Interval Parsing
             const getIntervalSeconds = (int: string) => {
-                if (int.endsWith('m')) return parseInt(int) * 60;
+                if (int.endsWith('m') && !int.endsWith('mo')) return parseInt(int) * 60;
                 if (int.endsWith('h')) return parseInt(int) * 3600;
                 if (int.endsWith('d')) return parseInt(int) * 86400;
+                if (int.endsWith('wk')) return parseInt(int) * 86400 * 7;
+                if (int.endsWith('mo')) return parseInt(int) * 86400 * 30;
                 return 60; // Default 1m
             };
 
@@ -131,63 +151,34 @@ export default function TerminalPage() {
 
     // Handlers
     const handleIntervalChange = (val: string) => {
-        // Map UI to API Interval
-        // 5m, 15m, 1H->1h, 4H->1h (agg later), 1D->1d
-        let apiInt = val;
-        if (val === '1H') apiInt = '1h';
-        if (val === '4H') apiInt = '1h'; // Fallback
-        if (val === '1D') apiInt = '1d';
-
-        setActiveInterval(apiInt);
+        // val is already api value like '1m', '5m', '1h' from new UI buttons
+        setActiveInterval(val);
         setLoading(true);
         setLiveCandle(undefined);
     };
 
     const handleRangeChange = (val: string) => {
-        // Map UI to API Range
-        // 1D->1d, 1M->1mo, 1Y->1y, ALL->max
-        let apiRng = val;
-        if (val === '1M') apiRng = '1mo';
-        if (val === '1Y') apiRng = '1y';
-        if (val === '1D') apiRng = '1d';
+        // val is UI range like '1D', '5D', '1M'
+        // Map to API Range
+        let apiRng = val.toLowerCase();
+        if (val === 'ALL') apiRng = 'max';
+        if (val === 'YTD') apiRng = 'ytd';
+        if (val === '1M') apiRng = '1mo'; // 1m is 1 minute, 1mo is 1 month
+        if (val === '3M') apiRng = '3mo';
+        if (val === '6M') apiRng = '6mo';
 
-        // Enforce Logic
-        const config = RANGE_CONFIG[val] || { valid: [], default: '1d' };
-        // Check if current interval is valid
-        // activeInterval is API format (1h), UI buttons are 1H. 
-        // Need to check against UI format if possible or map back.
-        // Simpler: Map API interval back to UI for check, or just check 'activeInterval' against mapped config defaults?
-        // Let's rely on the config using UI keys (1H) and mapping.
+        // Get Config for this UI Range
+        const config = RANGE_CONFIG[val];
+        if (!config) return;
 
-        // Actually, we need to set the API interval
-        // Let's find the UI key for the current activeInterval to check validity
-        // This is getting complex with the mapping.
-        // Let's simplify: Just set to default for the range if we switch ranges? 
-        // No, user annoyance.
-
-        // Let's use a helper to get valid API intervals for this Range
-        // valid UI: ['5m', ...]. Map to API: ['5m', ...]
-        // 1H -> 1h, 4H -> 1h.
-
-        // Quick map for check
-        const uiToApi = (ui: string) => {
-            if (ui === '1H' || ui === '4H') return '1h';
-            if (ui === '1D') return '1d';
-            return ui;
-        };
-
-        const validApiIntervals = config.valid.map(uiToApi);
-
+        // Check if current activeInterval is valid for this range
         let newInterval = activeInterval;
-        if (!validApiIntervals.includes(activeInterval) && activeInterval !== '1wk' && activeInterval !== '1mo') {
-            // Current is invalid, switch to default
-            newInterval = uiToApi(config.default);
+        if (!config.valid.includes(activeInterval)) {
+            newInterval = config.default;
         }
 
         setActiveRange(apiRng);
-        if (newInterval !== activeInterval) {
-            setActiveInterval(newInterval);
-        }
+        setActiveInterval(newInterval);
         setLoading(true);
         setLiveCandle(undefined);
     };
@@ -292,6 +283,13 @@ export default function TerminalPage() {
         if (exists) {
             setActiveIndicators(prev => prev.filter(i => i.type !== type));
         } else {
+            // Restrain: Max 3 active indicators
+            if (activeIndicators.length >= 3) {
+                // Simple alert fallback as no Toast component found
+                alert("Maximum 3 active indicators allowed used to prevent chart clutter.");
+                return;
+            }
+
             // Add new with default params
             const newConfig: IndicatorConfig = {
                 id: `${type}-${Date.now()}`,
@@ -447,7 +445,7 @@ for (let i = period; i < close.length; i++) {
 
     // --- Workspace State ---
     const [activeTool, setActiveTool] = useState("cursor");
-    const [rightTab, setRightTab] = useState<"ai" | "watchlist" | "news">("watchlist"); // Default to watchlist initially
+    const [rightTab, setRightTab] = useState<"ai" | "watchlist" | "news" | "technicals">("watchlist"); // Default to watchlist initially
     const [showAIInsights, setShowAIInsights] = useState(true);
 
     const renderAIContent = () => (
@@ -575,21 +573,33 @@ for (let i = period; i < close.length; i++) {
                         {/* Intervals */}
                         <div className="flex items-center gap-0.5">
                             <span className="text-[10px] text-muted-foreground mr-1 uppercase">Int</span>
-                            {['5m', '15m', '1H', '4H', '1D'].map(int => (
-                                <button
-                                    key={int}
-                                    onClick={() => handleIntervalChange(int)}
-                                    className={cn(
-                                        "px-1.5 py-0.5 text-[10px] font-medium rounded hover:bg-white/5 transition-colors relative",
-                                        activeInterval === int ? "text-primary bg-primary/10" : "text-muted-foreground",
-                                        // Highlight default if it's not the active one (or even if it is, to show it's default)
-                                        RANGE_CONFIG[activeRange === '1mo' ? '1M' : activeRange === '1y' ? '1Y' : activeRange === '1d' ? '1D' : activeRange === 'max' ? 'ALL' : '1D']?.default === int && "ring-1 ring-primary/30"
-                                    )}
-                                    disabled={!RANGE_CONFIG[activeRange === '1mo' ? '1M' : activeRange === '1y' ? '1Y' : activeRange === '1d' ? '1D' : activeRange === 'max' ? 'ALL' : '1D']?.valid.includes(int)}
-                                >
-                                    {int}
-                                </button>
-                            ))}
+                            {AP_INTERVALS.map(int => {
+                                // Find current UI Range Key for validation logic
+                                const currentUiRange = Object.keys(RANGE_CONFIG).find(key => {
+                                    let apiR = key.toLowerCase();
+                                    if (key === 'ALL') apiR = 'max';
+                                    if (key === 'YTD') apiR = 'ytd';
+                                    if (key === '1M') apiR = '1mo';
+                                    return apiR === activeRange;
+                                }) || '1D';
+
+                                const isValid = RANGE_CONFIG[currentUiRange]?.valid.includes(int.value);
+
+                                return (
+                                    <button
+                                        key={int.value}
+                                        onClick={() => handleIntervalChange(int.value)}
+                                        disabled={!isValid}
+                                        className={cn(
+                                            "px-1.5 py-0.5 text-[10px] font-medium rounded hover:bg-white/5 transition-colors relative",
+                                            activeInterval === int.value ? "text-primary bg-primary/10" : "text-muted-foreground",
+                                            !isValid && "opacity-30 cursor-not-allowed"
+                                        )}
+                                    >
+                                        {int.label}
+                                    </button>
+                                )
+                            })}
                         </div>
 
                         <div className="h-4 w-px bg-white/10 mx-2" />
@@ -597,23 +607,27 @@ for (let i = period; i < close.length; i++) {
                         {/* Ranges */}
                         <div className="flex items-center gap-0.5">
                             <span className="text-[10px] text-muted-foreground mr-1 uppercase">Rng</span>
-                            {['1D', '1M', '1Y', 'ALL'].map(rng => (
-                                <button
-                                    key={rng}
-                                    onClick={() => handleRangeChange(rng)}
-                                    className={cn(
-                                        "px-1.5 py-0.5 text-[10px] font-medium rounded hover:bg-white/5 transition-colors relative",
-                                        (activeRange === '1d' && rng === '1D') ||
-                                            (activeRange === '1mo' && rng === '1M') ||
-                                            (activeRange === '1y' && rng === '1Y') ||
-                                            (activeRange === 'max' && rng === 'ALL')
-                                            ? "text-primary bg-primary/10 ring-1 ring-primary/30"
-                                            : "text-muted-foreground"
-                                    )}
-                                >
-                                    {rng}
-                                </button>
-                            ))}
+                            {Object.keys(RANGE_CONFIG).map(rng => {
+                                let apiR = rng.toLowerCase();
+                                if (rng === 'ALL') apiR = 'max';
+                                if (rng === 'YTD') apiR = 'ytd';
+                                if (rng === '1M') apiR = '1mo';
+
+                                return (
+                                    <button
+                                        key={rng}
+                                        onClick={() => handleRangeChange(rng)}
+                                        className={cn(
+                                            "px-1.5 py-0.5 text-[10px] font-medium rounded hover:bg-white/5 transition-colors relative",
+                                            activeRange === apiR
+                                                ? "text-primary bg-primary/10 ring-1 ring-primary/30"
+                                                : "text-muted-foreground"
+                                        )}
+                                    >
+                                        {rng}
+                                    </button>
+                                )
+                            })}
                         </div>
                         <div className="h-6 w-px bg-white/10 mx-1" />
 
@@ -712,6 +726,16 @@ for (let i = period; i < close.length; i++) {
                                 News
                                 {rightTab === "news" && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
                             </button>
+                            <button
+                                onClick={() => setRightTab("technicals")}
+                                className={cn(
+                                    "flex-1 py-3 text-xs font-medium uppercase tracking-wider hover:bg-white/5 transition-colors relative",
+                                    rightTab === "technicals" ? "text-primary " : "text-muted-foreground"
+                                )}
+                            >
+                                Techs
+                                {rightTab === "technicals" && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
+                            </button>
                         </div>
 
                         {/* Tab Content */}
@@ -719,6 +743,7 @@ for (let i = period; i < close.length; i++) {
                             {rightTab === "ai" && renderAIContent()}
                             {rightTab === "watchlist" && renderWatchlistContent()}
                             {rightTab === "news" && <NewsPanel ticker={ticker} />}
+                            {rightTab === "technicals" && <TechnicalsPanel data={chartData || []} />}
                         </div>
                     </div>
                 </div>

@@ -116,12 +116,23 @@ export function TechnicalChart({
                 borderColor: "rgba(255, 255, 255, 0.1)",
                 timeVisible: true,
                 secondsVisible: false,
+                rightOffset: 12, // Give space on the right
+                barSpacing: 6,
             },
             rightPriceScale: {
                 borderColor: "rgba(255, 255, 255, 0.1)",
+                autoScale: true,
             },
             crosshair: {
                 mode: 1,
+                vertLine: {
+                    color: "rgba(255, 255, 255, 0.2)",
+                    labelBackgroundColor: '#3B82F6',
+                },
+                horzLine: {
+                    color: "rgba(255, 255, 255, 0.2)",
+                    labelBackgroundColor: '#3B82F6',
+                }
             },
         });
 
