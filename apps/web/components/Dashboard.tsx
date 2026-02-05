@@ -94,7 +94,7 @@ export function Dashboard() {
                 activeIndicators={activeIndicators}
             />
 
-            <header className="flex justify-between items-center mb-8 relative z-10">
+            <header className="flex justify-between items-center mb-8 relative z-10 gap-4">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Market Terminal</h1>
                     <p className="text-muted-foreground mt-1 flex items-center gap-3">
@@ -116,6 +116,12 @@ export function Dashboard() {
                         )}
                     </p>
                 </div>
+
+                {/* Central Search Bar */}
+                <div className="flex-1 max-w-md mx-6">
+                    <SearchBar />
+                </div>
+
                 <div className="flex items-center gap-4">
                     <button
                         onClick={() => setShowIndicators(true)}
@@ -134,11 +140,6 @@ export function Dashboard() {
                     <UserMenu />
                 </div>
             </header>
-
-            {/* Search Section */}
-            <div className="flex justify-center -mt-4 mb-8">
-                <SearchBar />
-            </div>
 
             {/* Main Layout */}
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">

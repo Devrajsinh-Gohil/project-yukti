@@ -27,6 +27,14 @@ export interface ChartDataPoint {
     volume?: number;
 }
 
+export interface StreamTrade {
+    symbol: string;
+    price: number;
+    size: number;
+    timestamp: string;
+    exchange: string;
+}
+
 export async function fetchChartData(ticker: string, range: string = "1mo", interval?: string, signal?: AbortSignal): Promise<ChartDataPoint[]> {
     try {
         let url = `${API_BASE_URL}/chart/${ticker}?range=${range}`;
@@ -59,7 +67,7 @@ export async function searchTickers(query: string): Promise<SearchResult[]> {
         const response = await fetch(`${API_BASE_URL}/search?q=${encodeURIComponent(query)}`);
         if (!response.ok) return [];
         const data = await response.json();
-        return data.results;
+        return data.results || [];
     } catch (error) {
         console.error("Search failed:", error);
         return [];

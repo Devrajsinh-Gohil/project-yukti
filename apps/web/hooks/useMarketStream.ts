@@ -1,12 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-
-export interface StreamTrade {
-    symbol: string;
-    price: number;
-    size: number;
-    timestamp: string;
-    exchange: string;
-}
+import { StreamTrade } from "@/lib/api";
 
 export function useMarketStream(active: boolean = true) {
     const [lastTrade, setLastTrade] = useState<StreamTrade | null>(null);

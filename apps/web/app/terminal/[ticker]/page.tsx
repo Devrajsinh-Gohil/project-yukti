@@ -3,10 +3,10 @@
 import ProtectedRoute from "@/components/ProtectedRoute";
 import { useParams, useRouter } from "next/navigation";
 import { TechnicalChart } from "@/components/TechnicalChart";
-import { ArrowLeft, BrainCircuit, Activity, Layers, Loader2, BarChart2, TrendingUp as TrendingUpIcon, AreaChart as AreaChartIcon, Heart, Code, Terminal } from "lucide-react";
+import { ArrowLeft, BrainCircuit, Activity, Layers, Loader2, BarChart2, TrendingUp as TrendingUpIcon, AreaChart as AreaChartIcon, Heart, Code, Terminal, PanelRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { fetchChartData, ChartDataPoint } from "@/lib/api";
 import { addToWatchlist, createWatchlist, getUserWatchlists, removeFromWatchlist, syncUserProfile, updateHistory, getSystemConfig } from "@/lib/db";
 import { calculateIndicators, calculateHeikinAshi, IndicatorConfig } from "@/lib/indicators";
@@ -24,31 +24,17 @@ import { BacktestEngine, BacktestResult } from "@/lib/backtest-engine";
 import { ScriptEditor } from "@/components/ScriptEditor";
 import { ScriptManager } from "@/components/ScriptManager";
 import { TechnicalsPanel } from "@/components/TechnicalsPanel";
+import { Separator as ResizableHandle, Panel as ResizablePanel, Group as ResizablePanelGroup, type PanelImperativeHandle } from "react-resizable-panels";
+import { ChartGrid, ChartLayoutType } from "@/components/ChartGrid";
+import { SmartChart } from "@/components/SmartChart";
+import { AP_INTERVALS, RANGE_CONFIG } from "@/hooks/useChartData";
+import { SearchBar } from "@/components/SearchBar";
+import { LayoutTemplate, Search, ChevronDown } from "lucide-react";
 
-const AP_INTERVALS = [
-    { label: '1m', value: '1m' },
-    { label: '5m', value: '5m' },
-    { label: '15m', value: '15m' },
-    { label: '30m', value: '30m' },
-    { label: '1h', value: '1h' },
-    // Wait, yfinance supports "60m" or "1h". "4h" isn't standard yfinance. 
-    // Let's stick to standard yfinance intervals: 1m, 5m, 15m, 30m, 1h, 1d, 1wk, 1mo.
-    { label: '1D', value: '1d' },
-    { label: '1W', value: '1wk' },
-    { label: '1M', value: '1mo' },
-];
+/* 
+   AP_INTERVALS and RANGE_CONFIG are now imported from hooks/useChartData 
+*/
 
-const RANGE_CONFIG: Record<string, { valid: string[], default: string }> = {
-    '1D': { valid: ['1m', '2m', '5m', '15m', '30m', '1h'], default: '5m' }, // 1m is heavy, default 5m
-    '5D': { valid: ['5m', '15m', '30m', '1h'], default: '15m' },
-    '1M': { valid: ['15m', '30m', '1h', '1d'], default: '1h' },
-    '3M': { valid: ['1h', '1d', '1wk'], default: '1d' },
-    '6M': { valid: ['1h', '1d', '1wk'], default: '1d' },
-    'YTD': { valid: ['1d', '1wk', '1mo'], default: '1d' },
-    '1Y': { valid: ['1d', '1wk', '1mo'], default: '1d' },
-    '5Y': { valid: ['1wk', '1mo'], default: '1wk' },
-    'ALL': { valid: ['1mo', '3mo'], default: '1mo' }
-};
 
 const CHART_COLORS = { backgroundColor: "#050505", textColor: "#64748B" };
 
@@ -72,99 +58,51 @@ export default function TerminalPage() {
     const router = useRouter();
     const ticker = (params.ticker as string).toUpperCase();
 
-    // State
-    const [activeRange, setActiveRange] = useState("1mo"); // API value directly: 1d, 5d, 1mo...
-    const [activeInterval, setActiveInterval] = useState("1h"); // API value directly: 1m, 5m...
-    const [chartData, setChartData] = useState<ChartDataPoint[] | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [chartMode, setChartMode] = useState<"candle" | "area" | "line" | "heikin">("candle");
+    // --- Multi-Chart State ---
+    type ChartConfig = {
+        id: string;
+        interval: string;
+        range: string;
+        ticker?: string; // Optional override
+        mode: "candle" | "area" | "line" | "heikin";
+        indicators: IndicatorConfig[];
+    };
 
-    // Live Data State
+    const [chartLayout, setChartLayout] = useState<ChartLayoutType>("single");
+    const [charts, setCharts] = useState<ChartConfig[]>([
+        { id: "main", interval: "1h", range: "1mo", mode: "candle", indicators: [] }
+    ]);
+    const [activeChartId, setActiveChartId] = useState("main");
+
+    // Helper to update active chart
+    const updateActiveChart = (updates: Partial<ChartConfig>) => {
+        setCharts(prev => prev.map(c => c.id === activeChartId ? { ...c, ...updates } : c));
+    };
+
+    // Helper to get active chart
+    const activeChart = charts.find(c => c.id === activeChartId) || charts[0];
+
+    // Live Data State (Global Stream)
     const { lastTrade } = useMarketStream(true); // Always listen, filter locally
-    const [liveCandle, setLiveCandle] = useState<ChartDataPoint | undefined>(undefined);
 
-    // Filter and Process Stream
-    useEffect(() => {
-        if (!lastTrade || !chartData || chartData.length === 0) return;
+    // Scripting Data Legacy Support (Hoisted)
+    const [chartData, setChartData] = useState<ChartDataPoint[] | null>(null);
 
-        // Normalization: BTC-USD (Page) vs BTCUSDT (Stream)
-        const pageSymbol = ticker.replace("-", "").replace("USD", "").toUpperCase();
-        const streamSymbol = lastTrade.symbol.toUpperCase();
-
-        if (streamSymbol.startsWith(pageSymbol)) {
-            const lastCandle = chartData[chartData.length - 1];
-            // Fix: Use timestamp from trade if available
-            const tradeTime = lastTrade.timestamp ? new Date(lastTrade.timestamp).getTime() : Date.now();
-
-            // Interval Parsing
-            const getIntervalSeconds = (int: string) => {
-                if (int.endsWith('m') && !int.endsWith('mo')) return parseInt(int) * 60;
-                if (int.endsWith('h')) return parseInt(int) * 3600;
-                if (int.endsWith('d')) return parseInt(int) * 86400;
-                if (int.endsWith('wk')) return parseInt(int) * 86400 * 7;
-                if (int.endsWith('mo')) return parseInt(int) * 86400 * 30;
-                return 60; // Default 1m
-            };
-
-            const intervalSec = getIntervalSeconds(activeInterval);
-            const lastCandleTime = typeof lastCandle.time === 'string'
-                ? new Date(lastCandle.time).getTime() / 1000
-                : lastCandle.time;
-
-            const tradeTimeSec = Math.floor(tradeTime / 1000);
-            const isNewCandle = (tradeTimeSec - (lastCandleTime as number)) >= intervalSec;
-
-            if (isNewCandle) {
-                // Finalize PREVIOUS candle first
-                if (liveCandle) {
-                    setChartData(prev => prev ? [...prev, liveCandle] : [liveCandle]);
-                }
-
-                // Create NEW candle
-                const newCandle: ChartDataPoint = {
-                    time: (lastCandleTime as number) + intervalSec,
-                    open: lastTrade.price,
-                    high: lastTrade.price,
-                    low: lastTrade.price,
-                    close: lastTrade.price,
-                    volume: lastTrade.size
-                };
-                setLiveCandle(newCandle);
-            } else {
-                // Update CURRENT candle
-                const baseLow = liveCandle ? liveCandle.low : lastCandle.low;
-                const baseHigh = liveCandle ? liveCandle.high : lastCandle.high;
-                const baseOpen = liveCandle ? liveCandle.open : lastCandle.open;
-                const currentVol = liveCandle ? (liveCandle.volume || 0) : (lastCandle.volume || 0);
-
-                const updated: ChartDataPoint = {
-                    time: lastCandle.time,
-                    open: baseOpen,
-                    close: lastTrade.price,
-                    high: Math.max(baseHigh, lastTrade.price),
-                    low: Math.min(baseLow, lastTrade.price),
-                    volume: currentVol + lastTrade.size
-                };
-                setLiveCandle(updated);
-            }
-        }
-    }, [lastTrade, chartData, ticker, activeInterval]);
+    // Note: Live aggregation is now handled inside SmartChart via useChartData hook.
+    // We just pass `lastTrade` down.
 
     // Handlers
+    // Handlers
     const handleIntervalChange = (val: string) => {
-        // val is already api value like '1m', '5m', '1h' from new UI buttons
-        setActiveInterval(val);
-        setLoading(true);
-        setLiveCandle(undefined);
+        updateActiveChart({ interval: val });
     };
 
     const handleRangeChange = (val: string) => {
-        // val is UI range like '1D', '5D', '1M'
         // Map to API Range
         let apiRng = val.toLowerCase();
         if (val === 'ALL') apiRng = 'max';
         if (val === 'YTD') apiRng = 'ytd';
-        if (val === '1M') apiRng = '1mo'; // 1m is 1 minute, 1mo is 1 month
+        if (val === '1M') apiRng = '1mo';
         if (val === '3M') apiRng = '3mo';
         if (val === '6M') apiRng = '6mo';
 
@@ -173,37 +111,42 @@ export default function TerminalPage() {
         if (!config) return;
 
         // Check if current activeInterval is valid for this range
-        let newInterval = activeInterval;
-        if (!config.valid.includes(activeInterval)) {
+        let newInterval = activeChart.interval;
+        if (!config.valid.includes(activeChart.interval)) {
             newInterval = config.default;
         }
 
-        setActiveRange(apiRng);
-        setActiveInterval(newInterval);
-        setLoading(true);
-        setLiveCandle(undefined);
+        updateActiveChart({ range: apiRng, interval: newInterval });
     };
 
-    useEffect(() => {
-        const controller = new AbortController();
-        const loadData = async () => {
-            try {
-                const data = await fetchChartData(ticker, activeRange, activeInterval, controller.signal);
-                if (!controller.signal.aborted) {
-                    setChartData(data);
-                    setLoading(false);
-                    setLiveCandle(undefined);
-                }
-            } catch (err: any) {
-                if (err.name !== 'AbortError') {
-                    console.error("Failed to load chart data", err);
-                    if (!controller.signal.aborted) setLoading(false);
-                }
+    // Layout Change Handler
+    const handleLayoutChange = (newLayout: ChartLayoutType) => {
+        setChartLayout(newLayout);
+        // If switching to multi-view, ensure we have enough chart configs
+        setCharts(prev => {
+            const desiredCount = newLayout === 'quad' ? 4 : (newLayout === 'single' ? 1 : 2);
+            if (prev.length >= desiredCount) return prev;
+
+            // Add new charts by cloning the active one or default
+            const missing = desiredCount - prev.length;
+            const newConfigs: ChartConfig[] = [];
+            const base = prev[prev.length - 1] || prev[0];
+
+            for (let i = 0; i < missing; i++) {
+                newConfigs.push({
+                    ...base,
+                    id: `chart-${Date.now()}-${i}`,
+                    indicators: [] // Start clean or clone? Let's start clean to unnecessary load
+                });
             }
-        };
-        loadData();
-        return () => { controller.abort(); };
-    }, [ticker, activeRange, activeInterval]);
+            return [...prev, ...newConfigs];
+        });
+
+        // If active chart becomes hidden (e.g. single view), reset active to main
+        if (newLayout === 'single') setActiveChartId(charts[0].id);
+    };
+
+    // Removed Data Fetching UseEffect (Moved to useChartData hook)
 
     // History & Favorites
     const { user } = useAuth();
@@ -272,21 +215,24 @@ export default function TerminalPage() {
 
     // --- Indicators State ---
     const [showIndicators, setShowIndicators] = useState(false);
-    const [activeIndicators, setActiveIndicators] = useState<IndicatorConfig[]>([]);
+    // Removed local activeIndicators state. Using activeChart.indicators.
 
     // Settings Dialog State
     const [editingIndicator, setEditingIndicator] = useState<IndicatorConfig | null>(null);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+    const [isSearchOpen, setIsSearchOpen] = useState(false);
+    const [isLayoutMenuOpen, setIsLayoutMenuOpen] = useState(false);
+    const [isModeMenuOpen, setIsModeMenuOpen] = useState(false);
 
     const toggleIndicator = (type: string) => {
-        const exists = activeIndicators.some(i => i.type === type);
+        const currentIndicators = activeChart.indicators;
+        const exists = currentIndicators.some(i => i.type === type);
 
         if (exists) {
-            setActiveIndicators(prev => prev.filter(i => i.type !== type));
+            updateActiveChart({ indicators: currentIndicators.filter(i => i.type !== type) });
         } else {
             // Restrain: Max 3 active indicators
-            if (activeIndicators.length >= 3) {
-                // Simple alert fallback as no Toast component found
+            if (currentIndicators.length >= 3) {
                 alert("Maximum 3 active indicators allowed used to prevent chart clutter.");
                 return;
             }
@@ -297,12 +243,12 @@ export default function TerminalPage() {
                 type,
                 params: DEFAULT_INDICATOR_PARAMS[type] || { period: 14 }
             };
-            setActiveIndicators(prev => [...prev, newConfig]);
+            updateActiveChart({ indicators: [...currentIndicators, newConfig] });
         }
     };
 
     const handleRemoveIndicator = (id: string) => {
-        setActiveIndicators(prev => prev.filter(i => i.id !== id));
+        updateActiveChart({ indicators: activeChart.indicators.filter(i => i.id !== id) });
     };
 
     const handleEditIndicator = (config: IndicatorConfig) => {
@@ -311,14 +257,14 @@ export default function TerminalPage() {
     };
 
     const handleSaveIndicator = (newConfig: IndicatorConfig) => {
-        setActiveIndicators(prev => prev.map(i => i.id === newConfig.id ? newConfig : i));
+        updateActiveChart({ indicators: activeChart.indicators.map(i => i.id === newConfig.id ? newConfig : i) });
     };
 
-    // Calculate Indicators
-    const indicatorsData = useMemo(() => {
-        if (!chartData || activeIndicators.length === 0) return [];
-        return calculateIndicators(chartData, activeIndicators);
-    }, [chartData, activeIndicators]);
+    // Removed indicatorsData memo (Calculated inside SmartChart)
+
+    // --- Chart Data Derived ---
+    // Removed chartDataToRender memo (Calculated inside SmartChart)
+
 
     // --- Scripting Engine State ---
     const [scripts, setScripts] = useState<Script[]>([]);
@@ -326,6 +272,18 @@ export default function TerminalPage() {
     const [isScriptPanelOpen, setIsScriptPanelOpen] = useState(false);
     const [scriptResults, setScriptResults] = useState<ScriptResult[]>([]);
     const [backtestResult, setBacktestResult] = useState<BacktestResult | null>(null);
+
+    // Layout State
+    const rightPanelRef = useRef<PanelImperativeHandle>(null);
+    const [isRightPanelOpen, setIsRightPanelOpen] = useState(true);
+
+    const toggleRightPanel = () => {
+        const panel = rightPanelRef.current;
+        if (panel) {
+            if (isRightPanelOpen) panel.collapse();
+            else panel.expand();
+        }
+    };
 
     // Editor State
     const [executionLogs, setExecutionLogs] = useState<string[]>([]);
@@ -460,14 +418,7 @@ for (let i = period; i < close.length; i++) {
 
     const activeScript = scripts.find(s => s.id === activeScriptId);
 
-    // Derived Data for Chart Rendering
-    const chartDataToRender = useMemo(() => {
-        if (!chartData) return [];
-        if (chartMode === 'heikin') {
-            return calculateHeikinAshi(chartData);
-        }
-        return chartData;
-    }, [chartData, chartMode]);
+
 
 
     // --- Workspace State ---
@@ -534,6 +485,8 @@ for (let i = period; i < close.length; i++) {
         <WatchlistPanel currentTicker={ticker} />
     );
 
+
+
     return (
         <ProtectedRoute>
             <div className="h-screen w-screen bg-[#050505] text-foreground flex flex-col overflow-hidden font-sans">
@@ -548,55 +501,148 @@ for (let i = period; i < close.length; i++) {
                     open={showIndicators}
                     onOpenChange={setShowIndicators}
                     onSelectIndicator={toggleIndicator}
-                    activeIndicators={activeIndicators.map(i => i.type)} // Menu expects strings
+                    activeIndicators={activeChart.indicators.map(i => i.type)}
                 />
 
                 {/* Top Toolbar */}
-                <header className="h-12 border-b border-white/5 flex items-center justify-between px-2 bg-[#0B0E11] z-30">
+                <header className="h-12 border-b border-white/5 flex items-center justify-between px-2 bg-[#0B0E11] z-50 shrink-0">
                     <div className="flex items-center gap-1">
                         <button onClick={() => router.push('/')} className="p-2 hover:bg-white/5 rounded text-muted-foreground">
                             <ArrowLeft className="w-4 h-4" />
                         </button>
                         <div className="h-6 w-px bg-white/10 mx-1" />
-                        <div className="flex items-center gap-2 px-2">
-                            <h1 className="font-bold text-sm tracking-tight">{ticker}</h1>
-                            <span className="text-[10px] bg-white/5 px-1 rounded text-muted-foreground">NSE</span>
+                        <div className="flex items-center gap-2 px-2 relative group">
+                            {/* Ticker Selector */}
+                            {!isSearchOpen ? (
+                                <button
+                                    onClick={() => setIsSearchOpen(true)}
+                                    className="text-left hover:bg-white/5 p-1 -ml-1 rounded transition-colors"
+                                >
+                                    <h1 className="font-bold text-sm tracking-tight">{activeChart?.ticker || ticker}</h1>
+                                    <span className="text-[10px] bg-white/5 px-1 rounded text-muted-foreground">NSE</span>
+                                </button>
+                            ) : (
+                                <div className="absolute top-0 left-0 w-[400px] z-50">
+                                    <SearchBar
+                                        className="w-full h-8 text-xs"
+                                        onSelect={(val) => {
+                                            updateActiveChart({ ticker: val });
+                                            setIsSearchOpen(false);
+                                        }}
+                                    />
+                                    <div
+                                        className="fixed inset-0 z-40"
+                                        onClick={() => setIsSearchOpen(false)}
+                                    />
+                                </div>
+                            )}
+                        </div>
+                        <div className="h-6 w-px bg-white/10 mx-1" />
+
+                        {/* Layout Selector */}
+                        {/* Layout Selector Dropdown */}
+                        <div className="relative">
+                            <button
+                                onClick={() => setIsLayoutMenuOpen(!isLayoutMenuOpen)}
+                                className={cn(
+                                    "p-1.5 rounded hover:bg-white/5 transition-colors text-muted-foreground hover:text-primary",
+                                    isLayoutMenuOpen && "bg-white/5 text-primary"
+                                )}
+                                title="Change Layout"
+                            >
+                                <LayoutTemplate className="w-4 h-4" />
+                            </button>
+
+                            {isLayoutMenuOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsLayoutMenuOpen(false)} />
+                                    <div className="absolute top-full left-0 mt-2 bg-[#0B0E11] border border-white/10 rounded-lg shadow-xl z-50 p-1 min-w-[120px] flex flex-col gap-1">
+                                        <div className="text-[10px] text-muted-foreground px-2 py-1 uppercase tracking-wider font-semibold">Layout</div>
+                                        <button
+                                            onClick={() => { handleLayoutChange('single'); setIsLayoutMenuOpen(false); }}
+                                            className={cn("flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-white/5 text-left", chartLayout === 'single' && "text-primary bg-primary/10")}
+                                        >
+                                            <div className="w-3 h-3 border border-current rounded-sm" />
+                                            <span>Single</span>
+                                        </button>
+                                        <button
+                                            onClick={() => { handleLayoutChange('vertical'); setIsLayoutMenuOpen(false); }}
+                                            className={cn("flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-white/5 text-left", chartLayout === 'vertical' && "text-primary bg-primary/10")}
+                                        >
+                                            <div className="w-3 h-3 border border-current rounded-sm flex"><div className="w-1/2 border-r border-current"></div></div>
+                                            <span>Split</span>
+                                        </button>
+                                        <button
+                                            onClick={() => { handleLayoutChange('quad'); setIsLayoutMenuOpen(false); }}
+                                            className={cn("flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-white/5 text-left", chartLayout === 'quad' && "text-primary bg-primary/10")}
+                                        >
+                                            <LayoutTemplate className="w-3 h-3" />
+                                            <span>Grid (4)</span>
+                                        </button>
+                                    </div>
+                                </>
+                            )}
                         </div>
                         <div className="h-6 w-px bg-white/10 mx-1" />
 
                         {/* Chart Types */}
-                        <div className="flex items-center gap-1 mx-2">
+                        {/* Chart Mode Dropdown */}
+                        <div className="relative">
                             <button
-                                onClick={() => setChartMode("candle")}
-                                className={cn("p-1.5 rounded hover:bg-white/5", chartMode === "candle" ? "text-primary bg-primary/10" : "text-muted-foreground")}
-                                title="Candles"
+                                onClick={() => setIsModeMenuOpen(!isModeMenuOpen)}
+                                className={cn(
+                                    "p-1.5 rounded hover:bg-white/5 transition-colors flex items-center gap-1.5 text-xs font-medium",
+                                    isModeMenuOpen ? "bg-white/5 text-primary" : "text-muted-foreground"
+                                )}
+                                title="Chart Type"
                             >
-                                <BarChart2 className="w-4 h-4" />
+                                {activeChart.mode === 'candle' && <BarChart2 className="w-4 h-4" />}
+                                {activeChart.mode === 'heikin' && <Activity className="w-4 h-4 rotate-90" />}
+                                {activeChart.mode === 'line' && <TrendingUpIcon className="w-4 h-4" />}
+                                {activeChart.mode === 'area' && <AreaChartIcon className="w-4 h-4" />}
+                                <ChevronDown className="w-3 h-3 opacity-50" />
                             </button>
-                            <button
-                                onClick={() => setChartMode("heikin")}
-                                className={cn("p-1.5 rounded hover:bg-white/5", chartMode === "heikin" ? "text-primary bg-primary/10" : "text-muted-foreground")}
-                                title="Heikin Ashi"
-                            >
-                                <Activity className="w-4 h-4 rotate-90" /> {/* Using Activity rotated as pseudo-HA icon */}
-                            </button>
-                            <button
-                                onClick={() => setChartMode("line")}
-                                className={cn("p-1.5 rounded hover:bg-white/5", chartMode === "line" ? "text-primary bg-primary/10" : "text-muted-foreground")}
-                                title="Line"
-                            >
-                                <TrendingUpIcon className="w-4 h-4" />
-                            </button>
-                            <button
-                                onClick={() => setChartMode("area")}
-                                className={cn("p-1.5 rounded hover:bg-white/5", chartMode === "area" ? "text-primary bg-primary/10" : "text-muted-foreground")}
-                                title="Area"
-                            >
-                                <AreaChartIcon className="w-4 h-4" />
-                            </button>
+
+                            {isModeMenuOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsModeMenuOpen(false)} />
+                                    <div className="absolute top-full left-0 mt-2 bg-[#0B0E11] border border-white/10 rounded-lg shadow-xl z-50 p-1 min-w-[140px] flex flex-col gap-1">
+                                        <div className="text-[10px] text-muted-foreground px-2 py-1 uppercase tracking-wider font-semibold">Style</div>
+                                        <button
+                                            onClick={() => { updateActiveChart({ mode: 'candle' }); setIsModeMenuOpen(false); }}
+                                            className={cn("flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-white/5 text-left", activeChart.mode === 'candle' && "text-primary bg-primary/10")}
+                                        >
+                                            <BarChart2 className="w-3.5 h-3.5" />
+                                            <span>Candles</span>
+                                        </button>
+                                        <button
+                                            onClick={() => { updateActiveChart({ mode: 'heikin' }); setIsModeMenuOpen(false); }}
+                                            className={cn("flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-white/5 text-left", activeChart.mode === 'heikin' && "text-primary bg-primary/10")}
+                                        >
+                                            <Activity className="w-3.5 h-3.5 rotate-90" />
+                                            <span>Heikin Ashi</span>
+                                        </button>
+                                        <button
+                                            onClick={() => { updateActiveChart({ mode: 'line' }); setIsModeMenuOpen(false); }}
+                                            className={cn("flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-white/5 text-left", activeChart.mode === 'line' && "text-primary bg-primary/10")}
+                                        >
+                                            <TrendingUpIcon className="w-3.5 h-3.5" />
+                                            <span>Line</span>
+                                        </button>
+                                        <button
+                                            onClick={() => { updateActiveChart({ mode: 'area' }); setIsModeMenuOpen(false); }}
+                                            className={cn("flex items-center gap-2 px-2 py-1.5 rounded text-xs hover:bg-white/5 text-left", activeChart.mode === 'area' && "text-primary bg-primary/10")}
+                                        >
+                                            <AreaChartIcon className="w-3.5 h-3.5" />
+                                            <span>Area</span>
+                                        </button>
+                                    </div>
+                                </>
+                            )}
                         </div>
                         <div className="h-6 w-px bg-white/10 mx-1" />
 
+                        {/* Intervals */}
                         {/* Intervals */}
                         <div className="flex items-center gap-0.5">
                             <span className="text-[10px] text-muted-foreground mr-1 uppercase">Int</span>
@@ -607,7 +653,7 @@ for (let i = period; i < close.length; i++) {
                                     if (key === 'ALL') apiR = 'max';
                                     if (key === 'YTD') apiR = 'ytd';
                                     if (key === '1M') apiR = '1mo';
-                                    return apiR === activeRange;
+                                    return apiR === activeChart.range;
                                 }) || '1D';
 
                                 const isValid = RANGE_CONFIG[currentUiRange]?.valid.includes(int.value);
@@ -619,7 +665,7 @@ for (let i = period; i < close.length; i++) {
                                         disabled={!isValid}
                                         className={cn(
                                             "px-1.5 py-0.5 text-[10px] font-medium rounded hover:bg-white/5 transition-colors relative",
-                                            activeInterval === int.value ? "text-primary bg-primary/10" : "text-muted-foreground",
+                                            activeChart.interval === int.value ? "text-primary bg-primary/10" : "text-muted-foreground",
                                             !isValid && "opacity-30 cursor-not-allowed"
                                         )}
                                     >
@@ -646,7 +692,7 @@ for (let i = period; i < close.length; i++) {
                                         onClick={() => handleRangeChange(rng)}
                                         className={cn(
                                             "px-1.5 py-0.5 text-[10px] font-medium rounded hover:bg-white/5 transition-colors relative",
-                                            activeRange === apiR
+                                            activeChart.range === apiR
                                                 ? "text-primary bg-primary/10 ring-1 ring-primary/30"
                                                 : "text-muted-foreground"
                                         )}
@@ -683,135 +729,178 @@ for (let i = period; i < close.length; i++) {
                         <Button variant="ghost" size="sm" onClick={toggleFavorite} className={cn("h-8 w-8 p-0", isFavorite && "text-red-500")}>
                             <Heart className={cn("w-4 h-4", isFavorite && "fill-current")} />
                         </Button>
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className={cn("h-8 w-8", !isRightPanelOpen && "opacity-50")}
+                            onClick={toggleRightPanel}
+                            title="Toggle Sidebar"
+                        >
+                            <PanelRight className="w-4 h-4" />
+                        </Button>
                         <UserMenu />
                     </div>
                 </header>
 
-                {/* Main Workspace Layout */}
-                <div className="flex-1 flex overflow-hidden">
-                    {/* Left Toolbar */}
-                    <DrawingToolbar activeTool={activeTool} onToolSelect={setActiveTool} />
+                {/* Resizable Main Layout */}
+                <div className="flex-1 overflow-hidden">
+                    <ResizablePanelGroup orientation="vertical">
+                        {/* Top Section: Chart + Right Panel */}
+                        <ResizablePanel defaultSize={isScriptPanelOpen ? 70 : 100} minSize={20}>
+                            <ResizablePanelGroup orientation="horizontal">
+                                {/* Chart Area (with Toolbar) */}
+                                <ResizablePanel defaultSize={75} minSize={30}>
+                                    <div className="flex h-full w-full min-w-0 overflow-hidden">
+                                        <DrawingToolbar activeTool={activeTool} onToolSelect={setActiveTool} />
+                                        <div className="flex-1 flex flex-col relative bg-[#050505] min-w-0 overflow-hidden">
+                                            <ChartGrid
+                                                layout={chartLayout}
+                                                charts={charts.map(c => c.id)}
+                                                activeChartId={activeChartId}
+                                                onActivateChart={setActiveChartId}
+                                                renderChart={(id, syncProps) => {
+                                                    const config = charts.find(c => c.id === id);
+                                                    if (!config) return null;
+                                                    return (
+                                                        <SmartChart
+                                                            key={id}
+                                                            id={id}
+                                                            ticker={config.ticker || ticker}
+                                                            interval={config.interval}
+                                                            range={config.range}
+                                                            mode={config.mode}
+                                                            indicators={config.indicators}
+                                                            lastTrade={lastTrade}
+                                                            activeTool={activeTool}
+                                                            onDrawingComplete={() => setActiveTool("cursor")}
+                                                            scriptResults={id === activeChartId ? scriptResults : []}
+                                                            syncProps={syncProps}
+                                                            colors={CHART_COLORS}
+                                                            isActive={id === activeChartId}
+                                                            onDataLoad={(d) => {
+                                                                // Sync legacy chartData for Scripts if this is active chart
+                                                                if (id === activeChartId) {
+                                                                    setChartData(d);
+                                                                }
+                                                            }}
+                                                        />
+                                                    );
+                                                }}
+                                            />
+                                        </div>
+                                    </div>
+                                </ResizablePanel>
 
-                    {/* Center Chart */}
-                    <div className="flex-1 flex flex-col relative bg-[#050505]">
-                        <div className="flex-1 w-full h-full relative">
-                            {loading && (
-                                <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-20">
-                                    <Loader2 className="w-8 h-8 animate-spin text-primary" />
-                                </div>
-                            )}
+                                <ResizableHandle className="w-1 bg-white/5 hover:bg-white/10 transition-colors" />
 
-                            {/* Legend Overlay */}
-                            <TechnicalChart
-                                data={chartDataToRender}
-                                indicators={indicatorsData}
-                                activeTool={activeTool}
-                                mode={chartMode}
-                                onDrawingComplete={() => setActiveTool("cursor")}
-                                colors={CHART_COLORS}
-                                liveDataPoint={liveCandle}
-                                scriptResults={scriptResults}
-                            />
-
-
-                        </div>
-                    </div>
-
-                    {/* Right Panel (Collapsible / Tabbed) */}
-                    <div className="w-[320px] border-l border-white/5 bg-[#0B0E11] flex flex-col z-20">
-                        {/* Tabs */}
-                        <div className="flex border-b border-white/5">
-                            {showAIInsights && (
-                                <button
-                                    onClick={() => setRightTab("ai")}
-                                    className={cn(
-                                        "flex-1 py-3 text-xs font-medium uppercase tracking-wider hover:bg-white/5 transition-colors relative",
-                                        rightTab === "ai" ? "text-primary " : "text-muted-foreground"
-                                    )}
+                                {/* Right Panel */}
+                                <ResizablePanel
+                                    panelRef={rightPanelRef}
+                                    defaultSize={25}
+                                    minSize={15}
+                                    collapsible={true}
+                                    collapsedSize={0}
+                                    onResize={(size) => setIsRightPanelOpen(size.asPercentage > 0)}
                                 >
-                                    AI Insight
-                                    {rightTab === "ai" && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
-                                </button>
-                            )}
-                            <button
-                                onClick={() => setRightTab("watchlist")}
-                                className={cn(
-                                    "flex-1 py-3 text-xs font-medium uppercase tracking-wider hover:bg-white/5 transition-colors relative",
-                                    rightTab === "watchlist" ? "text-primary " : "text-muted-foreground"
-                                )}
-                            >
-                                Watchlist
-                                {rightTab === "watchlist" && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
-                            </button>
-                            <button
-                                onClick={() => setRightTab("news")}
-                                className={cn(
-                                    "flex-1 py-3 text-xs font-medium uppercase tracking-wider hover:bg-white/5 transition-colors relative",
-                                    rightTab === "news" ? "text-primary " : "text-muted-foreground"
-                                )}
-                            >
-                                News
-                                {rightTab === "news" && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
-                            </button>
-                            <button
-                                onClick={() => setRightTab("technicals")}
-                                className={cn(
-                                    "flex-1 py-3 text-xs font-medium uppercase tracking-wider hover:bg-white/5 transition-colors relative",
-                                    rightTab === "technicals" ? "text-primary " : "text-muted-foreground"
-                                )}
-                            >
-                                Techs
-                                {rightTab === "technicals" && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
-                            </button>
-                        </div>
+                                    <div className="h-full w-full border-l border-white/5 bg-[#0B0E11] flex flex-col min-w-0 overflow-hidden">
+                                        {/* Tabs */}
+                                        <div className="flex border-b border-white/5">
+                                            {showAIInsights && (
+                                                <button
+                                                    onClick={() => setRightTab("ai")}
+                                                    className={cn(
+                                                        "flex-1 py-3 text-xs font-medium uppercase tracking-wider hover:bg-white/5 transition-colors relative",
+                                                        rightTab === "ai" ? "text-primary " : "text-muted-foreground"
+                                                    )}
+                                                >
+                                                    AI
+                                                    {rightTab === "ai" && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
+                                                </button>
+                                            )}
+                                            <button
+                                                onClick={() => setRightTab("watchlist")}
+                                                className={cn(
+                                                    "flex-1 py-3 text-xs font-medium uppercase tracking-wider hover:bg-white/5 transition-colors relative",
+                                                    rightTab === "watchlist" ? "text-primary " : "text-muted-foreground"
+                                                )}
+                                            >
+                                                Watch
+                                                {rightTab === "watchlist" && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
+                                            </button>
+                                            <button
+                                                onClick={() => setRightTab("news")}
+                                                className={cn(
+                                                    "flex-1 py-3 text-xs font-medium uppercase tracking-wider hover:bg-white/5 transition-colors relative",
+                                                    rightTab === "news" ? "text-primary " : "text-muted-foreground"
+                                                )}
+                                            >
+                                                News
+                                                {rightTab === "news" && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
+                                            </button>
+                                            <button
+                                                onClick={() => setRightTab("technicals")}
+                                                className={cn(
+                                                    "flex-1 py-3 text-xs font-medium uppercase tracking-wider hover:bg-white/5 transition-colors relative",
+                                                    rightTab === "technicals" ? "text-primary " : "text-muted-foreground"
+                                                )}
+                                            >
+                                                Techs
+                                                {rightTab === "technicals" && <div className="absolute bottom-0 left-0 w-full h-0.5 bg-primary" />}
+                                            </button>
+                                        </div>
 
-                        {/* Tab Content */}
-                        <div className="flex-1 overflow-hidden">
-                            {rightTab === "ai" && renderAIContent()}
-                            {rightTab === "watchlist" && renderWatchlistContent()}
-                            {rightTab === "news" && <NewsPanel ticker={ticker} />}
-                            {rightTab === "technicals" && <TechnicalsPanel data={chartData || []} />}
-                        </div>
-                    </div>
+                                        {/* Tab Content */}
+                                        <div className="flex-1 overflow-hidden overflow-y-auto">
+                                            {rightTab === "ai" && renderAIContent()}
+                                            {rightTab === "watchlist" && renderWatchlistContent()}
+                                            {rightTab === "news" && <NewsPanel ticker={ticker} />}
+                                            {rightTab === "technicals" && <TechnicalsPanel data={chartData || []} />}
+                                        </div>
+                                    </div>
+                                </ResizablePanel>
+                            </ResizablePanelGroup>
+                        </ResizablePanel>
+
+                        {/* Bottom Section: Script Editor */}
+                        {isScriptPanelOpen && (
+                            <>
+                                <ResizableHandle className="h-1 bg-white/5 hover:bg-white/10 transition-colors" />
+                                <ResizablePanel defaultSize={30} minSize={10} collapsible={true} collapsedSize={0} onResize={(size) => { if (size.asPercentage === 0) setIsScriptPanelOpen(false); }}>
+                                    <div className="h-full w-full border-t border-white/10 flex bg-[#0B0E11] overflow-hidden">
+                                        <ScriptManager
+                                            scripts={scripts}
+                                            selectedId={activeScriptId}
+                                            onSelect={setActiveScriptId}
+                                            onCreate={handleCreateScript}
+                                            onDelete={handleDeleteScript}
+                                            onToggle={handleToggleScript}
+                                        />
+                                        <div className="flex-1 h-full overflow-hidden">
+                                            {activeScript ? (
+                                                <ScriptEditor
+                                                    script={activeScript}
+                                                    onSave={handleSaveScript}
+                                                    onRun={handleRunScript}
+                                                    onBacktest={handleRunBacktest}
+                                                    logs={executionLogs}
+                                                    error={executionError}
+                                                    isRunning={executionLogRunning}
+                                                    backtestResult={backtestResult}
+                                                    chartData={chartData || []}
+                                                />
+                                            ) : (
+                                                <div className="h-full flex items-center justify-center text-muted-foreground text-sm">
+                                                    Select or create a script to edit
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </ResizablePanel>
+                            </>
+                        )}
+                    </ResizablePanelGroup>
                 </div>
-
-                {/* Script Editor Panel */}
-                {isScriptPanelOpen && (
-                    <div className="h-[300px] border-t border-white/10 flex z-[100] bg-[#0B0E11] shadow-2xl relative">
-                        {/* Drag Handle (Visual only for now) */}
-                        <div className="absolute top-0 left-0 w-full h-1 bg-white/5 hover:bg-white/10 cursor-ns-resize" />
-
-                        <ScriptManager
-                            scripts={scripts}
-                            selectedId={activeScriptId}
-                            onSelect={setActiveScriptId}
-                            onCreate={handleCreateScript}
-                            onDelete={handleDeleteScript}
-                            onToggle={handleToggleScript}
-                        />
-
-                        <div className="flex-1 overflow-hidden">
-                            {activeScript ? (
-                                <ScriptEditor
-                                    script={activeScript}
-                                    onSave={handleSaveScript}
-                                    onRun={handleRunScript}
-                                    onBacktest={handleRunBacktest}
-                                    logs={executionLogs}
-                                    error={executionError}
-                                    isRunning={executionLogRunning}
-                                    backtestResult={backtestResult}
-                                />
-                            ) : (
-                                <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-2">
-                                    <Code size={48} className="opacity-20" />
-                                    <div className="text-sm">Select or create a script to start coding</div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
-                )}
             </div>
-        </ProtectedRoute >
+        </ProtectedRoute>
     );
 }

@@ -29,27 +29,12 @@ const runTest = async () => {
     console.log("Generated " + data.length + " data points.");
 
     const scriptCode = `
-        // Simple SMA Strategy
         const period = 20;
         const sma = SMA.calculate({period, values: close});
-        
-        // Loop through history to find crossover signals
         for (let i = period; i < close.length; i++) {
-            const prevPrice = close[i - 1];
-            const prevSMA = sma[i - 1];
-            const currPrice = close[i];
-            const currSMA = sma[i];
-        
-            // Crossover Buy (Price goes UP above SMA)
-            if (prevPrice <= prevSMA && currPrice > currSMA) {
-                log("BUY Cross detected at index " + i);
-                signal(i, "BUY", "Cross");
-            }
-
-             // Crossover Sell (Price goes DOWN below SMA)
-            if (prevPrice >= prevSMA && currPrice < currSMA) {
-                log("SELL Cross detected at index " + i);
-                signal(i, "SELL", "Cross");
+            if (close[i] < sma[i]) {
+                plotShape(i, "", "arrowDown", "belowBar", "red", "small", 0, "Down");
+                bgcolor(i, "rgba(255, 0, 0, 0.1)");
             }
         }
     `;
@@ -58,12 +43,13 @@ const runTest = async () => {
     const result = await ScriptEngine.execute(scriptCode, data);
 
     console.log("Script Logs:", result.logs);
-    console.log("Signals Generated:", result.signals);
+    console.log("Shapes Generated:", result.shapes);
+    console.log("BgColors Generated:", result.bgColors);
 
-    if (result.signals.length > 0) {
-        console.log("SUCCESS: Signals generated.");
+    if (result.shapes && result.shapes.length > 0 && result.bgColors && result.bgColors.length > 0) {
+        console.log("SUCCESS: Visual Debugging elements generated.");
     } else {
-        console.error("FAILURE: No signals generated.");
+        console.error("FAILURE: No shapes or bgColors generated.");
     }
 };
 

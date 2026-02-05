@@ -77,12 +77,18 @@ export function BacktestPanel({ result, onClose }: BacktestPanelProps) {
             </div>
 
             {/* Metrics Grid */}
-            <div className="grid grid-cols-2 gap-4 p-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4">
                 <MetricCard
                     label="Net Profit"
                     value={`$${metrics.netProfit.toFixed(2)}`}
                     subValue={`${metrics.netProfitPercent.toFixed(2)}%`}
                     isPositive={metrics.netProfit >= 0}
+                />
+                <MetricCard
+                    label="Ann. Return"
+                    value={`${metrics.annualizedReturn.toFixed(1)}%`}
+                    subValue={`vs B&H ${metrics.buyAndHoldReturn.toFixed(1)}%`}
+                    isPositive={metrics.annualizedReturn > 0}
                 />
                 <MetricCard
                     label="Active Trades"
@@ -109,6 +115,11 @@ export function BacktestPanel({ result, onClose }: BacktestPanelProps) {
                     label="Sharpe Ratio"
                     value={metrics.sharpeRatio.toFixed(2)}
                     isPositive={metrics.sharpeRatio > 1}
+                />
+                <MetricCard
+                    label="Avg Trade"
+                    value={`${metrics.avgTrade.toFixed(2)}%`}
+                    isPositive={metrics.avgTrade > 0}
                 />
             </div>
 

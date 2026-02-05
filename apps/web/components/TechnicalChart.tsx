@@ -41,9 +41,14 @@ interface TechnicalChartProps {
     onDrawingComplete?: () => void;
     liveDataPoint?: { time: string | number; open?: number; high?: number; low?: number; close?: number; value?: number };
     scriptResults?: ScriptResult[];
+    // New Props for Multi-Chart
+    id?: string;
+    onCrosshairMove?: (param: LightweightCharts.MouseEventParams) => void;
+    syncCrosshair?: { x: number | null, y: number | null, time: number | null };
 }
 
 export function TechnicalChart({
+    id = "main",
     data,
     volumeData,
     predictionData,
@@ -54,7 +59,9 @@ export function TechnicalChart({
     activeTool = "cursor",
     onDrawingComplete,
     liveDataPoint,
-    scriptResults = []
+    scriptResults = [],
+    onCrosshairMove,
+    syncCrosshair
 }: TechnicalChartProps) {
     const chartContainerRef = useRef<HTMLDivElement>(null);
     const chartRefs = useRef<LightweightCharts.IChartApi[]>([]);
@@ -138,6 +145,11 @@ export function TechnicalChart({
 
         mainChartRef.current = mainChart;
         chartRefs.current = [mainChart];
+
+        // Sync: Emit Crosshair Move
+        mainChart.subscribeCrosshairMove((param) => {
+            if (onCrosshairMove) onCrosshairMove(param);
+        });
 
         // Observer for Main Chart Resize
         const resizeObserver = new ResizeObserver(() => {
@@ -276,14 +288,21 @@ export function TechnicalChart({
 
     }, [indicators]);
 
+    const [scriptBgColors, setScriptBgColors] = useState<{ time: number, color: string }[]>([]);
+
     // Handle Script Results (Markers & Plots)
     useEffect(() => {
         if (!mainSeriesRef.current || !scriptResults) return;
 
         try {
-            // 1. Process Markers (Buy/Sell Signals)
+            // 1. Process Markers (Buy/Sell Signals + Shapes)
             const markers: LightweightCharts.SeriesMarker<any>[] = [];
+
+            // Background Colors
+            const bgs: { time: number, color: string }[] = [];
+
             scriptResults.forEach(res => {
+                // Signals
                 res.signals.forEach(sig => {
                     markers.push({
                         time: sig.time as any,
@@ -291,10 +310,39 @@ export function TechnicalChart({
                         color: sig.type === 'BUY' ? '#22c55e' : '#ef4444',
                         shape: sig.type === 'BUY' ? 'arrowUp' : 'arrowDown',
                         text: (sig.label && sig.label !== 'Cross') ? sig.label : (sig.type === 'BUY' ? 'BUY' : 'SELL'),
-                        size: 2 as any, // Typed as SeriesMarker
+                        size: 1 as any,
                     });
                 });
+
+                // Shapes
+                if (res.shapes) {
+                    res.shapes.forEach(shape => {
+                        markers.push({
+                            time: shape.time as any,
+                            position: shape.position as any,
+                            color: shape.color || "#22c55e",
+                            shape: shape.type as any, // shapes map directly to LC types loosely? 
+                            // LC types: 'circle' | 'square' | 'arrowUp' | 'arrowDown'
+                            // My types: "arrowUp" | "arrowDown" | "circle" | "square" | "diamond" | "label" | "cross" | "x"
+                            // Need mapping or assume loose match for common ones. LC supports: arrowUp, arrowDown, circle, square.
+                            // Others need fallback or custom. For now, pass through.
+                            text: shape.text || undefined,
+                            size: (shape.size === 'tiny' ? 0.5 : shape.size === 'small' ? 1 : shape.size === 'large' ? 2 : 1) as any,
+                        });
+                    });
+                }
+
+                // Bg Colors
+                if (res.bgColors) {
+                    res.bgColors.forEach(bg => {
+                        // Standardize time
+                        const t = typeof bg.time === 'string' ? new Date(bg.time).getTime() / 1000 : bg.time;
+                        bgs.push({ time: t as number, color: bg.color });
+                    });
+                }
             });
+
+            setScriptBgColors(bgs);
 
             // Sort markers by time
             markers.sort((a, b) => (a.time as number) - (b.time as number));
@@ -302,14 +350,11 @@ export function TechnicalChart({
             // Use createSeriesMarkers for v5
             if (mainSeriesRef.current) {
                 try {
-                    // console.log("[TechnicalChart] Creating series markers plugin:", markers.length);
                     LightweightCharts.createSeriesMarkers(mainSeriesRef.current, markers);
                 } catch (e) {
                     console.error("[TechnicalChart] Failed to create set markers:", e);
                 }
             }
-
-            // TODO: Handle plots (custom lines) from scripts if needed in future
 
         } catch (e) {
             console.error("Error setting markers:", e);
@@ -379,6 +424,32 @@ export function TechnicalChart({
             priceScale.applyOptions({ mode: LightweightCharts.PriceScaleMode.Normal });
         }
     }, [scaleMode]);
+
+    // 6. Handle Incoming Crosshair Sync
+    useEffect(() => {
+        if (!mainChartRef.current || !syncCrosshair) return;
+        // Lightweight Charts v4 doesn't have a public API to SET crosshair position programmatically easy?
+        // Actually, it has `setCrosshairPosition`.
+        // Let's check docs or use `chart.setCrosshairPosition(price, time, series)`.
+
+        // However, if we only have time (logical index) it's easier.
+        // If we want exact, we need price.
+        // For MVP, allow the library to handle it if we passed the right params.
+
+        // Wait, v4/5 `setCrosshairPosition` takes (price, time, seriesApi).
+        // If we are syncing across different intervals, exact time sync is tricky.
+        // We should prioritize TIME sync.
+
+        if (syncCrosshair.time && mainSeriesRef.current) {
+            try {
+                // Safeguard: Ensure we don't crash if series is not ready or data is missing
+                mainChartRef.current.setCrosshairPosition(0, syncCrosshair.time as any, mainSeriesRef.current);
+            } catch (e) {
+                // Ignore sync errors during initialization/data loading
+                // console.warn("Sync crosshair failed", e);
+            }
+        }
+    }, [syncCrosshair]);
 
     // --- Drawing Renderers ---
 
@@ -739,9 +810,54 @@ export function TechnicalChart({
         }
     };
 
+    // Force re-render on scroll/zoom to update SVG overlays
+    useEffect(() => {
+        if (!mainChartRef.current) return;
+        const timeScale = mainChartRef.current.timeScale();
+        const onVisibleRangeChanged = () => {
+            setForceUpdate(prev => prev + 1);
+        };
+        timeScale.subscribeVisibleTimeRangeChange(onVisibleRangeChanged);
+        return () => {
+            timeScale.unsubscribeVisibleTimeRangeChange(onVisibleRangeChanged);
+        };
+    }, [isChartReady]);
+
+    const renderBgColor = (bg: { time: number, color: string }, index: number) => {
+        if (!mainChartRef.current || !mainSeriesRef.current || !isChartReady) return null;
+
+        const chart = mainChartRef.current;
+
+        // bg.time is seconds or ms? We normalized to seconds earlier if possible or just use whatever LC accepts?
+        // LC timeToCoordinate accepts the same format as setData.
+        // My normalization: `new Date(bg.time).getTime() / 1000`. So it is UNIX timestamp (seconds).
+
+        const x = chart.timeScale().timeToCoordinate(bg.time as any);
+        if (x === null) return null;
+
+        // Draw a strip. Width? Ideally 1 bar width.
+        // We can estimate bar width or just draw a line if width is pixel perfect.
+        // Let's draw a wide rect (e.g. 10px) centered? Or try to calculate barSpacing?
+        const spacing = chart.timeScale().options().barSpacing || 6;
+        const width = spacing; // * 0.8?
+
+        return (
+            <rect
+                key={`bg-${index}`}
+                x={x - (width / 2)}
+                y={0}
+                width={width}
+                height="100%"
+                fill={bg.color}
+                className="pointer-events-none mix-blend-screen"
+                style={{ opacity: 0.2 }} // Fallback opacity
+            />
+        );
+    };
+
     return (
-        <div className="w-full h-full flex flex-col bg-[#050505] relative">
-            <div ref={chartContainerRef} className="w-full h-full flex flex-col" />
+        <div className="w-full h-full flex flex-col bg-[#050505] relative overflow-hidden">
+            <div ref={chartContainerRef} className="w-full h-full flex flex-col overflow-hidden" />
 
             <div className="absolute top-2 right-2 z-[60] text-[10px] text-white bg-black/50 px-2 rounded pointer-events-none border border-white/10">
                 Tool: {activeTool} | Drawings: {drawings.length} {currentDrawing ? "| Drawing..." : ""}
@@ -765,6 +881,9 @@ export function TechnicalChart({
                     aria-label="Chart Drawing Area"
                 >
                     <svg className="w-full h-full overflow-visible">
+                        {/* Background Colors Layer */}
+                        {scriptBgColors.map((bg, i) => renderBgColor(bg, i))}
+
                         {/* eslint-disable-next-line react-hooks/refs */}
                         {drawings.map(d => renderDrawing(d))}
                         {/* eslint-disable-next-line react-hooks/refs */}
